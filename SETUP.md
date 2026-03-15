@@ -60,18 +60,24 @@ Do these in order. You’ll need: a GitHub account, a Resy account (logged in on
 
 ---
 
-## Step 3: Create a Gmail App Password
+## Step 3: Create a Gmail App Password (SMTP password)
+
+You need this so GitHub Actions can send you email. Gmail doesn’t allow your normal password for apps; you create a one-off **App Password**.
 
 1. **Turn on 2-Step Verification** (if it’s not already on)
    - Go to [Google Account → Security](https://myaccount.google.com/security).
-   - Under “How you sign in to Google,” turn on **2-Step Verification**.
+   - Under “How you sign in to Google,” click **2-Step Verification** and turn it on (you may need to confirm with your phone).
 
 2. **Create an App Password**
-   - Go to [App Passwords](https://myaccount.google.com/apppasswords) (or search “App passwords” in your Google account).
-   - Select app: **Mail**, device: **Other** (e.g. “Resy checker”), then **Generate**.
-   - Copy the **16-character password** (no spaces). That’s your **SMTP_PASSWORD**.
+   - Go to [App Passwords](https://myaccount.google.com/apppasswords).
+     - If you don’t see “App passwords,” make sure 2-Step Verification is on, or search “App passwords” in your Google account.
+   - Click **Select app** → choose **Mail**.
+   - Click **Select device** → choose **Other (Custom name)** and type e.g. **Resy checker**.
+   - Click **Generate**.
+   - Google shows a **16-character password** (like `abcd efgh ijkl mnop`). Copy it and remove the spaces → `abcdefghijklmnop`. That’s your **SMTP_PASSWORD**.
+   - You won’t see it again, so paste it into your GitHub secret right away.
 
-   You’ll use your normal Gmail address as **SMTP_USER** and **NOTIFY_EMAIL** in the next step.
+   Use your normal Gmail address (e.g. `you@gmail.com`) as **SMTP_USER** and **NOTIFY_EMAIL** in the next step.
 
 ---
 

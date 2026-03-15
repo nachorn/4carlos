@@ -1,13 +1,13 @@
 # 4 Charles Prime Rib – Resy availability checker
-# Runs daily at 9 AM ET (13:00 and 14:00 UTC). Emails you only when slots are found.
+# Runs daily at 9:00 AM ET. 3 tries, 10 seconds apart. Emails only when slots are found.
 
 name: Resy 4 Charles Check
 
 on:
   schedule:
-    # 9 AM Eastern: 13:00 UTC (EDT) and 14:00 UTC (EST)
-    - cron: '5 13 * * *'
-    - cron: '5 14 * * *'
+    # 9:00 AM Eastern: 13:00 UTC (EDT) and 14:00 UTC (EST)
+    - cron: '0 13 * * *'
+    - cron: '0 14 * * *'
   workflow_dispatch: # run manually for testing
 
 jobs:
@@ -22,18 +22,28 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Check Resy availability
+      - name: Check Resy availability (3 tries, 10s apart from 9:00)
         id: resy
         env:
           RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
           RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
         run: |
-          node check-resy.mjs > result.json
-          echo "available=$(jq -r '.available // false' result.json)" >> $GITHUB_OUTPUT
+          available=false
+          for i in $(seq 1 3); do
+            echo "Attempt $i at $(date -u +%H:%M:%S) UTC"
+            node check-resy.mjs > result.json
+            cat result.json
+            if jq -e '.available == true' result.json 2>/dev/null; then
+              available=true
+              echo "Slots found on attempt $i"
+              break
+            fi
+            if [ $i -lt 3 ]; then sleep 10; fi
+          done
+          echo "available=$available" >> $GITHUB_OUTPUT
           echo "slots<<EOF" >> $GITHUB_OUTPUT
           jq -r '(.slots // [])[] | "\(.date) \(.time)"' result.json >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          cat result.json
 
       - name: Send email on success
         if: steps.resy.outputs.available == 'true'

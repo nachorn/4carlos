@@ -36,7 +36,8 @@ Runs **in the cloud on GitHub Actions** so you don’t need your PC on. Checks R
 
 ## Schedule
 
-- Runs **twice daily** at 9:05 AM Eastern (13:05 and 14:05 UTC) so it works in both EDT and EST.
+- Runs **twice daily** at 9:00 AM Eastern (13:00 and 14:00 UTC) so it works in both EDT and EST.
+- **3 tries**, 10 seconds apart (first try right at 9:00, then +10s, then +20s).
 - You get an email **only when** the script finds at least one matching slot (4 people, dinner any day or Sat/Sun lunch).
 
 ## Test run
