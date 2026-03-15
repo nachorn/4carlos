@@ -1,5 +1,5 @@
 # 4 Charles Prime Rib – Resy availability checker
-# Runs daily at 9:00 AM ET. 3 tries, 10 seconds apart. Emails only when slots are found.
+# Runs daily at 9:00 AM ET. 3 tries, 10 seconds apart. Always sends you an email (success, no slots, or error).
 
 name: Resy 4 Charles Check
 
@@ -20,10 +20,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Check Resy availability (3 tries, 10s apart from 9:00)
         id: resy
+        continue-on-error: true
         env:
           RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
           RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
@@ -45,15 +46,15 @@ jobs:
           jq -r '(.slots // [])[] | "\(.date) \(.time)"' result.json >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Send email on success
-        if: steps.resy.outputs.available == 'true'
+      - name: Send email (slots available)
+        if: always() && steps.resy.outcome == 'success' && steps.resy.outputs.available == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 465
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "4 Charles Prime Rib – Resy slots available"
+          subject: "4 Charles Prime Rib – Slots available"
           to: ${{ secrets.NOTIFY_EMAIL }}
           body: |
             Slots are available for 4 Charles Prime Rib (4 people).
@@ -63,4 +64,41 @@ jobs:
             Slots found:
             ${{ steps.resy.outputs.slots }}
 
-            (This message was sent by your GitHub Actions workflow.)
+            (Resy 4 Charles checker – GitHub Actions)
+
+      - name: Send email (no slots)
+        if: always() && steps.resy.outcome == 'success' && steps.resy.outputs.available != 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "4 Charles Prime Rib – No slots this run"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          body: |
+            No availability found for 4 Charles Prime Rib (4 people) in this run.
+
+            Checked 3 times (10s apart). Next run tomorrow at 9:00 AM ET.
+
+            (Resy 4 Charles checker – GitHub Actions)
+
+      - name: Send email (error)
+        if: always() && steps.resy.outcome == 'failure'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "4 Charles Prime Rib – Checker error"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          body: |
+            The Resy checker hit an error (script or API failure).
+
+            Check the workflow run for details:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            You may need to refresh your RESY_AUTH_TOKEN in repo Secrets.
+
+            (Resy 4 Charles checker – GitHub Actions)
