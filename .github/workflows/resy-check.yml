@@ -1,0 +1,56 @@
+# 4 Charles Prime Rib – Resy availability checker
+# Runs daily at 9 AM ET (13:00 and 14:00 UTC). Emails you only when slots are found.
+
+name: Resy 4 Charles Check
+
+on:
+  schedule:
+    # 9 AM Eastern: 13:00 UTC (EDT) and 14:00 UTC (EST)
+    - cron: '5 13 * * *'
+    - cron: '5 14 * * *'
+  workflow_dispatch: # run manually for testing
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check Resy availability
+        id: resy
+        env:
+          RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
+          RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
+        run: |
+          node check-resy.mjs > result.json
+          echo "available=$(jq -r '.available // false' result.json)" >> $GITHUB_OUTPUT
+          echo "slots<<EOF" >> $GITHUB_OUTPUT
+          jq -r '(.slots // [])[] | "\(.date) \(.time)"' result.json >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          cat result.json
+
+      - name: Send email on success
+        if: steps.resy.outputs.available == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "4 Charles Prime Rib – Resy slots available"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          body: |
+            Slots are available for 4 Charles Prime Rib (4 people).
+
+            Book now: https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4
+
+            Slots found:
+            ${{ steps.resy.outputs.slots }}
+
+            (This message was sent by your GitHub Actions workflow.)

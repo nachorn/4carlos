@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4 Charles Prime Rib – Resy helper</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 1.5rem;
+      background: #0f0f0f;
+      color: #e5e5e5;
+      min-height: 100vh;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .sub { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    .rule {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.95rem;
+    }
+    .rule strong { color: #f5c26b; }
+    .today-box {
+      background: #1e2a1e;
+      border: 1px solid #2d4a2d;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .today-box h2 { font-size: 0.85rem; color: #8bc98b; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5rem 0; }
+    .today-box p { margin: 0; font-size: 1rem; }
+    .today-box a {
+      display: inline-block;
+      margin-top: 0.75rem;
+      padding: 0.5rem 1rem;
+      background: #2d4a2d;
+      color: #b8e0b8;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+    .today-box a:hover { background: #3d5a3d; }
+    h3 { font-size: 0.9rem; color: #888; margin-bottom: 0.75rem; }
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .links a {
+      padding: 0.5rem 0.75rem;
+      background: #252525;
+      color: #ccc;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      border: 1px solid #333;
+    }
+    .links a:hover { background: #333; color: #fff; }
+    .links a.dinner { border-color: #444; }
+    .links a.lunch-wknd { border-color: #3d3d2a; color: #c9c97a; }
+    .note { margin-top: 1.5rem; font-size: 0.85rem; color: #666; }
+    .tz { font-size: 0.8rem; color: #555; margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+  <h1>4 Charles Prime Rib</h1>
+  <p class="sub">Resy helper – 4 people · Dinner any day, or Sat/Sun lunch</p>
+
+  <div class="rule">
+    <strong>Release rule:</strong> Reservations open 21 days ahead. New date becomes available at <strong>9:00 AM ET</strong>.
+  </div>
+
+  <div class="today-box" id="today-box">
+    <h2>Go live today at 9 AM ET</h2>
+    <p id="date-text">Loading…</p>
+    <a id="today-link" href="#" target="_blank" rel="noopener">Open on Resy →</a>
+  </div>
+
+  <h3>Next 2 weeks (quick links – 4 seats)</h3>
+  <div class="links" id="links"></div>
+
+  <p class="note">
+    Bookmark this page. At 9 AM ET, click the green “Open on Resy” link and grab a time. Dinner any day or Sat/Sun lunch.
+  </p>
+  <p class="tz" id="tz"></p>
+
+  <script>
+    const VENUE = 'https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib';
+    const SEATS = 4;
+    const DAYS_AHEAD = 21;
+
+    function formatDate(d) {
+      return d.toISOString().slice(0, 10);
+    }
+
+    function dayName(d) {
+      return d.toLocaleDateString('en-US', { weekday: 'short' });
+    }
+
+    function resyUrl(dateStr) {
+      return `${VENUE}?date=${dateStr}&seats=${SEATS}`;
+    }
+
+    function isWeekend(d) {
+      const day = d.getDay();
+      return day === 0 || day === 6;
+    }
+
+    // Today in ET (simplified: use local for "today", 21 days = same logic)
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const releaseDate = new Date(today);
+    releaseDate.setDate(releaseDate.getDate() + DAYS_AHEAD);
+
+    const dateEl = document.getElementById('date-text');
+    const linkEl = document.getElementById('today-link');
+    dateEl.textContent = releaseDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+    linkEl.href = resyUrl(formatDate(releaseDate));
+
+    const linksDiv = document.getElementById('links');
+    const start = new Date(today);
+    start.setDate(start.getDate() + 1);
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      const dateStr = formatDate(d);
+      const a = document.createElement('a');
+      a.href = resyUrl(dateStr);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = `${dayName(d)} ${dateStr}`;
+      if (isWeekend(d)) a.classList.add('lunch-wknd');
+      else a.classList.add('dinner');
+      linksDiv.appendChild(a);
+    }
+
+    document.getElementById('tz').textContent = 'Times are in your local timezone. Resy releases at 9:00 AM Eastern.';
+  </script>
+</body>
+</html>
