@@ -5,9 +5,8 @@ name: Resy 4 Charles Check
 
 on:
   schedule:
-    # 9:00 AM Eastern: 13:00 UTC (EDT) and 14:00 UTC (EST)
+    # 9:00 AM Eastern (EDT). Single run so you get one email. In EST (winter) this is 8:00 AM.
     - cron: '0 13 * * *'
-    - cron: '0 14 * * *'
   workflow_dispatch: # run manually for testing
 
 jobs:
@@ -45,7 +44,7 @@ jobs:
           done
           echo "available=$available" >> $GITHUB_OUTPUT
           echo "slots<<EOF" >> $GITHUB_OUTPUT
-          jq -r '(.slots // [])[] | "\(.date) \(.time)"' result.json >> $GITHUB_OUTPUT
+          jq -r '(.slots // [])[] | (if .preferred then "★ " else "" end) + "\(.date) \(.time)"' result.json >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Send email (slots available)

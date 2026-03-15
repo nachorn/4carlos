@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Check 4 Charles Prime Rib (Resy) for availability.
- * Wants: 4 people, dinner any day OR Sat/Sun lunch.
+ * Wants: 4 people. Dinner any day 6:30–11 PM; lunch Sat/Sun only 12–4 PM.
  * Reservations release 21 days ahead at 9 AM ET.
  *
  * Usage: RESY_API_KEY=xxx RESY_AUTH_TOKEN=xxx node check-resy.mjs
@@ -31,17 +31,33 @@ function isWeekend(dateStr) {
   return day === 0 || day === 6; // Sun, Sat
 }
 
-// Dinner: 17:00+ (5 PM). Lunch: before 15:00 (3 PM) — only count for Sat/Sun
-function slotMatchesPref(slot, dateStr) {
+function getSlotHour(slot) {
   const start = slot?.date?.start || slot?.start_time || slot?.time;
-  if (!start) return true; // if we can't parse, count it
+  if (!start) return -1;
   const time = typeof start === 'string' ? start : start.toString();
-  const hour = parseInt(time.slice(11, 13), 10) || 0;
+  return parseInt(time.slice(11, 13), 10) || -1;
+}
+
+// Lunch (Sat/Sun only): 12–4 PM. Dinner (any day): 6:30–11 PM
+function slotMatchesPref(slot, dateStr) {
+  const hour = getSlotHour(slot);
+  if (hour < 0) return true;
   const weekend = isWeekend(dateStr);
-  if (weekend && hour < 15) return true;  // Sat/Sun lunch
-  if (hour >= 17) return true;           // dinner
-  if (weekend) return true;               // Sat/Sun any
-  return hour >= 17;                      // weekday = dinner only
+  const lunch = hour >= 12 && hour <= 16;   // 12 PM–4 PM
+  const dinner = hour >= 18 && hour <= 23;  // 6:30 PM–11 PM (hour only)
+  if (weekend && lunch) return true;
+  if (dinner) return true;
+  return false;
+}
+
+// Best lunch 1:30 PM (hour 13), best dinner 8–8:30 PM (hour 20)
+function isPreferredSlot(slot, dateStr) {
+  const hour = getSlotHour(slot);
+  if (hour < 0) return false;
+  const weekend = isWeekend(dateStr);
+  if (weekend && hour >= 12 && hour <= 16 && hour === 13) return true;  // 1 PM slot ~ 1:30
+  if (hour >= 18 && hour <= 23 && hour === 20) return true;            // 8 PM slot ~ 8–8:30
+  return false;
 }
 
 async function findAvailability(apiKey, authToken, dateStr) {
@@ -121,17 +137,28 @@ async function main() {
       }
       for (const s of slots) {
         const start = s?.date?.start || s?.start_time || s?.time || '';
-        allSlots.push({ date: dateStr, time: start });
+        allSlots.push({
+          date: dateStr,
+          time: start,
+          preferred: isPreferredSlot(s, dateStr),
+        });
       }
     } catch (e) {
       console.error(`Request failed for ${dateStr}:`, e.message);
     }
   }
 
+  // Best times first: preferred (lunch ~1:30, dinner ~8–8:30), then by date/time
+  allSlots.sort((a, b) => {
+    if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+    const d = (a.date + a.time).localeCompare(b.date + b.time);
+    return d;
+  });
+
   const available = allSlots.length > 0;
   console.log(JSON.stringify({
     available,
-    slots: allSlots.slice(0, 20),
+    slots: allSlots.slice(0, 20).map(({ date, time, preferred }) => ({ date, time, preferred })),
     checked: dates,
   }));
   process.exit(0);
