@@ -54,8 +54,9 @@ jobs:
           server_port: 465
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "4 Charles Prime Rib – Slots available"
+          from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
+          subject: "4 Charles Prime Rib – Slots available"
           body: |
             Slots are available for 4 Charles Prime Rib (4 people).
 
@@ -74,8 +75,9 @@ jobs:
           server_port: 465
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "4 Charles Prime Rib – No slots this run"
+          from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
+          subject: "4 Charles Prime Rib – No slots this run"
           body: |
             No availability found for 4 Charles Prime Rib (4 people) in this run.
 
@@ -91,8 +93,9 @@ jobs:
           server_port: 465
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "4 Charles Prime Rib – Checker error"
+          from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
+          subject: "4 Charles Prime Rib – Checker error"
           body: |
             The Resy checker hit an error (script or API failure).
 
