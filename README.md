@@ -36,6 +36,8 @@ Add these in GitHub under Settings -> Secrets and variables -> Actions.
 
 Resy tokens can expire. If the workflow starts sending checker-error emails, refresh `RESY_AUTH_TOKEN` the same way.
 
+If an email says `HTTP 419: Unauthorized` or `status: auth_failed`, Resy rejected the saved credentials. Refresh both `RESY_API_KEY` and `RESY_AUTH_TOKEN` from a newly logged-in browser session, then update the GitHub Actions secrets. Do not include `ResyAPI api_key=` or extra quotes in `RESY_API_KEY`.
+
 ## Schedule
 
 GitHub cron runs in UTC, so the workflow has two scheduled entries:
@@ -64,6 +66,8 @@ The status email includes:
 - any Resy credential/security errors
 - every polling attempt with timestamp, exit code, status, looked flag, and availability flag
 - the final checker JSON
+
+Auth failures are not retried. If Resy returns 401, 403, 419, or a security/verification page, the workflow sends a checker-error email immediately so you know to refresh the secrets.
 
 ## Local Test
 

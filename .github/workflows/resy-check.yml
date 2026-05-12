@@ -15,6 +15,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Prepare release window
         id: window
@@ -119,7 +121,7 @@ jobs:
                   "Checked dates: " + ((.checked // []) | join(", ")),
                   "",
                   "Counts:",
-                  (((.counts // []) | map("- \(.date): " + (if .ok then "API ok, \((.rawCount // 0) | tostring) raw slots, \((.matchedCount // 0) | tostring) matched preferences" else "API error" end)) | join("\n"))),
+                  (((.counts // []) | map("- \(.date): " + (if .ok then "API ok, \((.rawCount // 0) | tostring) raw slots, \((.matchedCount // 0) | tostring) matched preferences" else "API error (" + (.errorType // "unknown") + ")" end)) | join("\n"))),
                   (if ((.errors // []) | length) > 0 then "\nWarnings/errors:\n" + ((.errors // []) | map("- " + .) | join("\n")) else "\nResy API responded successfully for every checked date." end)
                 ] | join("\n")
               ' result.json >> "$GITHUB_OUTPUT"
@@ -152,16 +154,24 @@ jobs:
               result_status="$(jq -r '.status // "unknown"' result.json)"
               result_looked="$(jq -r '(.looked // false) | tostring' result.json)"
               result_available="$(jq -r '(.available // false) | tostring' result.json)"
+              result_auth_failed="$(jq -r '(.authFailed // false) | tostring' result.json)"
             else
               result_status="invalid_result"
               result_looked="false"
               result_available="false"
+              result_auth_failed="false"
             fi
 
-            echo "Attempt $i at $attempt_time: exit=$status, status=$result_status, looked=$result_looked, available=$result_available" >> attempt-log.txt
+            echo "Attempt $i at $attempt_time: exit=$status, status=$result_status, looked=$result_looked, authFailed=$result_auth_failed, available=$result_available" >> attempt-log.txt
 
             if [ "$status" -ne 0 ]; then
               echo "Checker returned status $status."
+              if [ "$status" -eq 3 ] || [ "$result_auth_failed" = "true" ]; then
+                echo "Auth failure is not retryable. Refresh RESY_API_KEY and RESY_AUTH_TOKEN in GitHub Secrets."
+                write_outputs
+                exit "$status"
+              fi
+
               if [ "$i" -lt 30 ]; then
                 sleep 4
                 continue
@@ -205,6 +215,11 @@ jobs:
             echo "- Status: ${{ steps.resy.outputs.status }}"
             echo "- Looked successfully: ${{ steps.resy.outputs.looked }}"
             echo "- Available: ${{ steps.resy.outputs.available }}"
+            if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
+              echo "- Auth failed: $(jq -r '(.authFailed // false) | tostring' result.json)"
+            else
+              echo "- Auth failed: unknown"
+            fi
             echo ""
             echo "Attempt log:"
             if [ -s attempt-log.txt ]; then
@@ -222,7 +237,7 @@ jobs:
                   "Checked dates: " + ((.checked // []) | join(", ")),
                   "",
                   "Counts:",
-                  (((.counts // []) | map("- \(.date): " + (if .ok then "API ok, \((.rawCount // 0) | tostring) raw slots, \((.matchedCount // 0) | tostring) matched preferences" else "API error" end)) | join("\n"))),
+                  (((.counts // []) | map("- \(.date): " + (if .ok then "API ok, \((.rawCount // 0) | tostring) raw slots, \((.matchedCount // 0) | tostring) matched preferences" else "API error (" + (.errorType // "unknown") + ")" end)) | join("\n"))),
                   (if ((.errors // []) | length) > 0 then "\nWarnings/errors:\n" + ((.errors // []) | map("- " + .) | join("\n")) else "\nResy API responded successfully for every checked date." end)
                 ] | join("\n")
               ' result.json

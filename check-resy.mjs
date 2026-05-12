@@ -14,6 +14,7 @@ const PARTY_SIZE = 4;
 const BASE = 'https://api.resy.com';
 const TIME_ZONE = 'America/New_York';
 const DATE_OFFSETS = [20, 21, 22];
+const AUTH_STATUS_CODES = new Set([401, 403, 419]);
 
 function datePartsInTimeZone(date, timeZone = TIME_ZONE) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -191,11 +192,17 @@ async function errorFromResponse(res) {
     // Keep the trimmed text fallback.
   }
 
-  if (res.status === 401 || res.status === 403) {
-    return `HTTP ${res.status}: Resy credentials are invalid, expired, or blocked`;
+  if (AUTH_STATUS_CODES.has(res.status)) {
+    return {
+      message: `HTTP ${res.status}: Resy credentials are invalid, expired, or blocked. Refresh RESY_API_KEY and RESY_AUTH_TOKEN from a logged-in browser session.`,
+      type: 'auth',
+    };
   }
 
-  return detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`;
+  return {
+    message: detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`,
+    type: 'http',
+  };
 }
 
 async function findAvailability(apiKey, authToken, dateStr) {
@@ -223,7 +230,8 @@ async function findAvailability(apiKey, authToken, dateStr) {
   });
 
   if (!res.ok) {
-    return { error: await errorFromResponse(res), slots: [], rawCount: 0 };
+    const { message, type } = await errorFromResponse(res);
+    return { error: message, errorType: type, slots: [], rawCount: 0 };
   }
 
   const contentType = (res.headers.get('content-type') || '').toLowerCase();
@@ -232,17 +240,28 @@ async function findAvailability(apiKey, authToken, dateStr) {
     if (/security-center|captcha|verify/i.test(text)) {
       return {
         error: 'Resy returned a security/verification page; refresh RESY_AUTH_TOKEN after passing the security center',
+        errorType: 'auth',
         slots: [],
         rawCount: 0,
       };
     }
-    return { error: `Unexpected response type: ${contentType || 'unknown'}`, slots: [], rawCount: 0 };
+    return {
+      error: `Unexpected response type: ${contentType || 'unknown'}`,
+      errorType: 'response',
+      slots: [],
+      rawCount: 0,
+    };
   }
 
   const data = await res.json();
   const apiError = extractApiError(data);
   if (apiError) {
-    return { error: apiError, slots: [], rawCount: 0 };
+    return {
+      error: apiError,
+      errorType: /auth|unauthori[sz]ed|token|credential/i.test(apiError) ? 'auth' : 'api',
+      slots: [],
+      rawCount: 0,
+    };
   }
 
   const list = extractSlots(data);
@@ -258,26 +277,29 @@ async function main() {
     console.log(JSON.stringify({
       available: false,
       looked: false,
+      authFailed: true,
       status: 'missing_credentials',
       slots: [],
       checked: [],
       errors: ['Missing RESY_API_KEY or RESY_AUTH_TOKEN'],
     }));
-    process.exit(2);
+    process.exit(3);
   }
 
   const dates = getDatesToCheck();
   const allSlots = [];
   const errors = [];
+  const authErrors = [];
   const counts = [];
 
   for (const dateStr of dates) {
     try {
-      const { slots, error, rawCount } = await findAvailability(apiKey, authToken, dateStr);
+      const { slots, error, errorType, rawCount } = await findAvailability(apiKey, authToken, dateStr);
 
       if (error) {
-        counts.push({ date: dateStr, ok: false, rawCount, matchedCount: 0 });
+        counts.push({ date: dateStr, ok: false, errorType, rawCount, matchedCount: 0 });
         errors.push(`${dateStr}: ${error}`);
+        if (errorType === 'auth') authErrors.push(`${dateStr}: ${error}`);
         continue;
       }
 
@@ -292,10 +314,12 @@ async function main() {
         });
       }
     } catch (error) {
+      counts.push({ date: dateStr, ok: false, errorType: 'request', rawCount: 0, matchedCount: 0 });
       errors.push(`${dateStr}: ${error.message}`);
     }
   }
 
+  const authFailed = authErrors.length > 0 && authErrors.length === errors.length;
   allSlots.sort((a, b) => {
     if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
     return `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`);
@@ -304,13 +328,16 @@ async function main() {
   const output = {
     available: allSlots.length > 0,
     looked: errors.length < dates.length,
+    authFailed,
     status: allSlots.length > 0
       ? 'slots_found'
-      : errors.length === 0
-        ? 'checked_no_slots'
-        : errors.length === dates.length
-          ? 'check_failed'
-          : 'partial_check',
+      : authFailed
+        ? 'auth_failed'
+        : errors.length === 0
+          ? 'checked_no_slots'
+          : errors.length === dates.length
+            ? 'check_failed'
+            : 'partial_check',
     slots: allSlots.slice(0, 20),
     checked: dates,
     counts,
@@ -319,7 +346,7 @@ async function main() {
   if (errors.length > 0) output.errors = errors;
 
   console.log(JSON.stringify(output));
-  process.exit(errors.length === dates.length ? 2 : 0);
+  process.exit(authFailed ? 3 : errors.length === dates.length ? 2 : 0);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

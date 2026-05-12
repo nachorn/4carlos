@@ -27,6 +27,8 @@ Create these five secrets:
    - `Authorization`: only the string inside `api_key="..."`.
    - `x-resy-auth-token`: the entire value.
 
+For `RESY_API_KEY`, do not paste `ResyAPI api_key=` and do not include the quote marks. For `RESY_AUTH_TOKEN`, paste the full token exactly as shown.
+
 ## 3. Create The Gmail App Password
 
 1. Turn on 2-Step Verification for your Google account if needed.
@@ -59,4 +61,4 @@ Every email includes the workflow run link, actual Eastern start time, self-test
 
 The checked/no-slots email tells you whether Resy responded. If it says `Looked successfully: true` and each date says `API ok`, the checker was able to inspect availability.
 
-If error emails mention Resy credentials or security verification, repeat the Resy credential steps and update `RESY_AUTH_TOKEN`.
+If error emails mention `HTTP 419: Unauthorized`, `auth_failed`, Resy credentials, or security verification, repeat the Resy credential steps and update both `RESY_API_KEY` and `RESY_AUTH_TOKEN`. A 419 means the checker reached Resy, but Resy rejected the stored token/key before showing availability.
