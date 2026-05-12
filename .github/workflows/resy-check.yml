@@ -1,54 +1,174 @@
-# 4 Charles Prime Rib – Resy availability checker
-# Runs daily at 9:00 AM ET. 3 tries, 10 seconds apart. Always sends you an email (success, no slots, or error).
+# 4 Charles Prime Rib - Resy availability checker
+# Starts before the 9:00 AM Eastern release window, then waits inside the job
+# so the first API checks happen as close to 9:00:00 ET as GitHub allows.
 
 name: Resy 4 Charles Check
 
 on:
   schedule:
-    # 9:00 AM Eastern (EDT). Single run so you get one email. In EST (winter) this is 8:00 AM.
-    - cron: '0 13 * * *'
-  workflow_dispatch: # run manually for testing
+    # 8:57 AM Eastern in daylight time and standard time.
+    - cron: '57 12 * * *'
+    - cron: '57 13 * * *'
+  workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    timeout-minutes: 15
     steps:
+      - name: Prepare release window
+        id: window
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "manual=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          et_time="$(TZ=America/New_York date +%H:%M:%S)"
+          et_hour="$(TZ=America/New_York date +%H)"
+          et_minute="$(TZ=America/New_York date +%M)"
+          et_offset="$(TZ=America/New_York date +%z)"
+          hour=$((10#$et_hour))
+          minute=$((10#$et_minute))
+
+          echo "Current Eastern time: $et_time"
+          echo "manual=false" >> "$GITHUB_OUTPUT"
+
+          if [ "$et_offset" = "-0400" ]; then
+            expected_schedule="57 12 * * *"
+          else
+            expected_schedule="57 13 * * *"
+          fi
+
+          if [ "${{ github.event.schedule }}" != "$expected_schedule" ]; then
+            echo "Skipping wrong-season UTC schedule."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if { [ "$hour" -eq 8 ] && [ "$minute" -ge 55 ]; } || [ "$hour" -eq 9 ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping because this scheduled run started outside the 8:55-9:59 AM Eastern release window."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait until 9 AM Eastern
+        if: steps.window.outputs.should_run == 'true' && steps.window.outputs.manual != 'true'
+        run: |
+          while true; do
+            et_hour="$(TZ=America/New_York date +%H)"
+            hour=$((10#$et_hour))
+
+            if [ "$hour" -ge 9 ]; then
+              break
+            fi
+
+            sleep 1
+          done
+
+          echo "Release window reached."
+
+      - name: Record check start time
+        if: steps.window.outputs.should_run == 'true'
+        id: release
+        run: |
+          started_at="$(TZ=America/New_York date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "Starting checks at $started_at"
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
+        if: steps.window.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node
+        if: steps.window.outputs.should_run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
-      - name: Check Resy availability (3 tries, 10s apart from 9:00)
+      - name: Run self-tests
+        if: steps.window.outputs.should_run == 'true'
+        run: node --test check-resy.test.mjs
+
+      - name: Check Resy availability (30 tries, 4s apart)
+        if: steps.window.outputs.should_run == 'true'
         id: resy
-        continue-on-error: true
         env:
           RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
           RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
         run: |
           available=false
-          for i in $(seq 1 3); do
-            echo "Attempt $i at $(date -u +%H:%M:%S) UTC"
+
+          write_outputs() {
+            echo "available=$available" >> "$GITHUB_OUTPUT"
+
+            if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
+              status_value="$(jq -r '.status // "unknown"' result.json)"
+              echo "status=$status_value" >> "$GITHUB_OUTPUT"
+              echo "looked=$(jq -r '(.looked // false) | tostring' result.json)" >> "$GITHUB_OUTPUT"
+
+              echo "summary<<EOF" >> "$GITHUB_OUTPUT"
+              jq -r '
+                [
+                  "Status: " + (.status // "unknown"),
+                  "Looked successfully: " + ((.looked // false) | tostring),
+                  "Checked dates: " + ((.checked // []) | join(", ")),
+                  "",
+                  "Counts:",
+                  (((.counts // []) | map("- \(.date): " + (if .ok then "API ok, \((.rawCount // 0) | tostring) raw slots, \((.matchedCount // 0) | tostring) matched preferences" else "API error" end)) | join("\n"))),
+                  (if ((.errors // []) | length) > 0 then "\nWarnings/errors:\n" + ((.errors // []) | map("- " + .) | join("\n")) else "\nResy API responded successfully for every checked date." end)
+                ] | join("\n")
+              ' result.json >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT"
+
+              echo "slots<<EOF" >> "$GITHUB_OUTPUT"
+              jq -r '(.slots // [])[] | (if .preferred then "* " else "" end) + "\(.date) \(.time)\n\(.url)\n"' result.json >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT"
+            else
+              echo "status=invalid_result" >> "$GITHUB_OUTPUT"
+              echo "looked=false" >> "$GITHUB_OUTPUT"
+              echo "summary<<EOF" >> "$GITHUB_OUTPUT"
+              echo "The checker did not produce valid JSON. Open the workflow log for details." >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          for i in $(seq 1 30); do
+            echo "Attempt $i at $(TZ=America/New_York date '+%H:%M:%S %Z')"
+
+            set +e
             node check-resy.mjs > result.json
+            status=$?
+            set -e
+
             cat result.json
-            if jq -e '.available == true' result.json 2>/dev/null; then
+
+            if [ "$status" -ne 0 ]; then
+              echo "Checker returned status $status."
+              if [ "$i" -lt 30 ]; then
+                sleep 4
+                continue
+              fi
+
+              write_outputs
+              exit "$status"
+            fi
+
+            if jq -e '.available == true' result.json >/dev/null 2>&1; then
               available=true
               echo "Slots found on attempt $i"
               break
             fi
-            if [ $i -lt 3 ]; then sleep 10; fi
+
+            if [ "$i" -lt 30 ]; then sleep 4; fi
           done
-          echo "available=$available" >> $GITHUB_OUTPUT
-          echo "slots<<EOF" >> $GITHUB_OUTPUT
-          jq -r '(.slots // [])[] | (if .preferred then "★ " else "" end) + "\(.date) \(.time)"' result.json >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+
+          write_outputs
 
       - name: Send email (slots available)
-        if: always() && steps.resy.outcome == 'success' && steps.resy.outputs.available == 'true'
+        if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -57,19 +177,26 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib – Slots available"
+          subject: "4 Charles Prime Rib - Slots available"
           body: |
             Slots are available for 4 Charles Prime Rib (4 people).
 
-            Book now: https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4
+            Started at:
+            ${{ steps.release.outputs.started_at }}
 
             Slots found:
             ${{ steps.resy.outputs.slots }}
 
-            (Resy 4 Charles checker – GitHub Actions)
+            Check details:
+            ${{ steps.resy.outputs.summary }}
 
-      - name: Send email (no slots)
-        if: always() && steps.resy.outcome == 'success' && steps.resy.outputs.available != 'true'
+            Book here:
+            https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4
+
+            Resy 4 Charles checker - GitHub Actions
+
+      - name: Send email (checked, no matching slots)
+        if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available != 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -78,16 +205,22 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib – No slots this run"
+          subject: "4 Charles Prime Rib - Checked, no matching slots"
           body: |
-            No availability found for 4 Charles Prime Rib (4 people) in this run.
+            The checker ran and did not find matching 4-person slots.
 
-            Checked 3 times (10s apart). Next run tomorrow at 9:00 AM ET.
+            Started at:
+            ${{ steps.release.outputs.started_at }}
 
-            (Resy 4 Charles checker – GitHub Actions)
+            Check details:
+            ${{ steps.resy.outputs.summary }}
 
-      - name: Send email (error)
-        if: always() && steps.resy.outcome == 'failure'
+            If "Looked successfully" is true and each date says "API ok", Resy responded and the checker was able to inspect availability.
+
+            Resy 4 Charles checker - GitHub Actions
+
+      - name: Send email (checker error)
+        if: steps.window.outputs.should_run == 'true' && failure() && steps.resy.outcome != 'success'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -96,13 +229,16 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib – Checker error"
+          subject: "4 Charles Prime Rib - Checker error"
           body: |
-            The Resy checker hit an error (script or API failure).
+            The Resy checker hit an error, usually from expired Resy credentials or an API/security response.
 
-            Check the workflow run for details:
+            Check details:
+            ${{ steps.resy.outputs.summary }}
+
+            Workflow run:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            You may need to refresh your RESY_AUTH_TOKEN in repo Secrets.
+            If the log mentions Resy credentials, pass the Resy security center again and update RESY_AUTH_TOKEN in repo Secrets.
 
-            (Resy 4 Charles checker – GitHub Actions)
+            Resy 4 Charles checker - GitHub Actions

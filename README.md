@@ -1,57 +1,83 @@
-# 4 Charles Prime Rib – Resy checker
+# 4 Charles Prime Rib - Resy checker
 
-Runs **in the cloud on GitHub Actions** so you don’t need your PC on. Checks Resy daily when new dates drop (9 AM ET). **Sends you an email only when there’s availability** for 4 people (dinner any day, or Sat/Sun lunch).
+Runs in GitHub Actions so your PC does not need to stay on. It starts just before the 9:00 AM Eastern release window, waits until 9:00 inside the job, then polls Resy for about two minutes.
 
-## What you need
+You get an email when slots are found, when the check completes with no matching slots, or when the checker hits a real error. The no-slots email includes diagnostics so you can tell whether Resy actually responded.
 
-1. **A GitHub account** and this repo pushed to GitHub (public or private).
-2. **Resy auth** (so the checker can call Resy’s API as you):
-   - Log in at [resy.com](https://resy.com).
-   - If you get sent to [Resy’s security center](https://resy.com/security-center) (captcha / “verify you’re human”), complete it **once** in your browser. The checker never opens the website—only the API—so you just need to pass this step to get a valid token.
-   - Open DevTools (F12) → **Network**.
-   - Go to [4 Charles on Resy](https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?date=2026-03-14&seats=4) and pick a date (after any security check).
-   - In Network, find a request to `api.resy.com` (e.g. `find` or `venues`). Click it → **Headers**.
-   - Copy:
-     - **Authorization** header → use only the part after `ResyAPI api_key=` (the quoted string). That’s `RESY_API_KEY`.
-     - **x-resy-auth-token** header → that’s `RESY_AUTH_TOKEN`.
-   - Resy may log you out; the token can expire. If emails stop or you see “security/verification page” in logs, pass the security center again and update the secret.
-3. **Email (Gmail)** so Actions can send you mail:
-   - Use a Gmail address and an [App Password](https://support.google.com/accounts/answer/185833) (not your normal password) for `SMTP_PASSWORD`.
+## What It Checks
 
-## Repo setup
+- Venue: 4 Charles Prime Rib
+- Party size: 4
+- Dates: today in New York + 20, 21, and 22 days
+- Matching slots: dinner any day from 6:30 PM to 11:00 PM, plus lunch on Saturday/Sunday from 12:00 PM to 4:00 PM
+- Preferred slots are listed first: around 1 PM weekend lunch or 8 PM dinner
 
-1. Push this project to a GitHub repo.
-2. In the repo: **Settings → Secrets and variables → Actions**.
-3. Add these **Actions secrets**:
+## Required GitHub Secrets
 
-   | Secret name         | What to put |
-   |---------------------|-------------|
-   | `RESY_API_KEY`      | From Authorization header (the api_key value only). |
-   | `RESY_AUTH_TOKEN`   | From `x-resy-auth-token` header. |
-   | `SMTP_USER`         | Your Gmail address (e.g. `you@gmail.com`). |
-   | `SMTP_PASSWORD`     | Gmail App Password (16-character). |
-   | `NOTIFY_EMAIL`      | Where to send the “slots available” email (can be same as `SMTP_USER`). |
+Add these in GitHub under Settings -> Secrets and variables -> Actions.
 
-4. Save. The workflow will run on schedule automatically.
+| Secret name | Value |
+| --- | --- |
+| `RESY_API_KEY` | The api_key value from the Resy `Authorization` request header. |
+| `RESY_AUTH_TOKEN` | The full `x-resy-auth-token` request header value. |
+| `SMTP_USER` | Your Gmail address. |
+| `SMTP_PASSWORD` | A Gmail App Password, not your normal Gmail password. |
+| `NOTIFY_EMAIL` | The email address that should receive alerts. |
+
+## Getting Resy Credentials
+
+1. Log in at [resy.com](https://resy.com).
+2. If Resy sends you to its security center, complete that once in your browser.
+3. Open DevTools with F12, then open the Network tab.
+4. Visit [4 Charles on Resy](https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4).
+5. Find a request to `api.resy.com`, open its request headers, and copy:
+   - `Authorization`: copy only the value inside `api_key="..."`.
+   - `x-resy-auth-token`: copy the full value.
+
+Resy tokens can expire. If the workflow starts sending checker-error emails, refresh `RESY_AUTH_TOKEN` the same way.
 
 ## Schedule
 
-- Runs **twice daily** at 9:00 AM Eastern (13:00 and 14:00 UTC) so it works in both EDT and EST.
-- **3 tries**, 10 seconds apart (first try right at 9:00, then +10s, then +20s).
-- You get an email **only when** the script finds at least one matching slot (4 people, dinner any day or Sat/Sun lunch).
+GitHub cron runs in UTC, so the workflow has two scheduled entries:
 
-## Test run
+- `12:57 UTC`, which is 8:57 AM Eastern during daylight saving time.
+- `13:57 UTC`, which is 8:57 AM Eastern during standard time.
 
-- In the repo: **Actions → Resy 4 Charles Check → Run workflow**.
-- Check the run log to see the script output; if slots are found, you should get an email.
+A guard step skips the wrong-season duplicate. The real run waits until 9:00 AM Eastern, then performs 30 checks, 4 seconds apart. Each email includes the actual Eastern start time so you can see whether GitHub Actions queued the job late.
+
+This is more reliable than scheduling exactly at 9:00 because GitHub Actions jobs can queue late at the top of the hour.
+
+Manual runs from the Actions tab always run immediately.
+
+## Email Diagnostics
+
+The status email includes:
+
+- `Looked successfully: true/false`
+- the dates checked
+- whether each date returned an API response
+- raw slot counts and preference-matched counts
+- any Resy credential/security errors
+
+## Local Test
+
+Run the no-network self-tests:
+
+```powershell
+node --test check-resy.test.mjs
+```
+
+Run the checker locally with real credentials:
+
+```powershell
+$env:RESY_API_KEY="your_api_key"
+$env:RESY_AUTH_TOKEN="your_auth_token"
+node check-resy.mjs
+```
 
 ## Files
 
-- `check-resy.mjs` – Node script that calls Resy’s API and prints JSON (available + slots).
-- `.github/workflows/resy-check.yml` – Scheduled workflow; runs the script and sends email on success.
-- `4-charles-resy-helper.html` – Local helper with direct Resy links (optional).
-
-## Notes
-
-- Resy’s token can expire; if you stop getting emails, re-copy `RESY_AUTH_TOKEN` (and `RESY_API_KEY` if needed) and update the secret.
-- The script checks the dates that typically release at 9 AM ET (20–22 days out). If Resy changes their release rule, you may need to adjust `getDatesToCheck()` in `check-resy.mjs`.
+- `check-resy.mjs`: Node script that calls Resy's API and prints JSON.
+- `check-resy.test.mjs`: Self-tests for date, slot parsing, and preference rules.
+- `.github/workflows/resy-check.yml`: Scheduled GitHub Actions checker and email alerts.
+- `4-charles-resy-helper.html`: Optional local helper with direct Resy links.
