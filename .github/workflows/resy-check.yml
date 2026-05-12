@@ -90,6 +90,7 @@ jobs:
 
       - name: Run self-tests
         if: steps.window.outputs.should_run == 'true'
+        id: run_self_tests
         run: node --test check-resy.test.mjs
 
       - name: Check Resy availability (30 tries, 4s apart)
@@ -100,6 +101,7 @@ jobs:
           RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
         run: |
           available=false
+          : > attempt-log.txt
 
           write_outputs() {
             echo "available=$available" >> "$GITHUB_OUTPUT"
@@ -136,7 +138,8 @@ jobs:
           }
 
           for i in $(seq 1 30); do
-            echo "Attempt $i at $(TZ=America/New_York date '+%H:%M:%S %Z')"
+            attempt_time="$(TZ=America/New_York date '+%H:%M:%S %Z')"
+            echo "Attempt $i at $attempt_time"
 
             set +e
             node check-resy.mjs > result.json
@@ -144,6 +147,18 @@ jobs:
             set -e
 
             cat result.json
+
+            if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
+              result_status="$(jq -r '.status // "unknown"' result.json)"
+              result_looked="$(jq -r '(.looked // false) | tostring' result.json)"
+              result_available="$(jq -r '(.available // false) | tostring' result.json)"
+            else
+              result_status="invalid_result"
+              result_looked="false"
+              result_available="false"
+            fi
+
+            echo "Attempt $i at $attempt_time: exit=$status, status=$result_status, looked=$result_looked, available=$result_available" >> attempt-log.txt
 
             if [ "$status" -ne 0 ]; then
               echo "Checker returned status $status."
@@ -167,6 +182,65 @@ jobs:
 
           write_outputs
 
+      - name: Build email diagnostics
+        if: steps.window.outputs.should_run == 'true' && always()
+        id: email
+        run: |
+          delimiter="EMAIL_BODY_$(date +%s%N)"
+          {
+            echo "body<<$delimiter"
+            echo "Run metadata:"
+            echo "- Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Trigger: ${{ github.event_name }}"
+            echo "- Schedule: ${{ github.event.schedule }}"
+            echo "- Ref: ${{ github.ref_name }}"
+            echo "- Commit: ${{ github.sha }}"
+            echo "- Started at: ${{ steps.release.outputs.started_at }}"
+            echo ""
+            echo "Step outcomes:"
+            echo "- Self-tests: ${{ steps.run_self_tests.outcome }}"
+            echo "- Resy check: ${{ steps.resy.outcome }}"
+            echo ""
+            echo "Resy result:"
+            echo "- Status: ${{ steps.resy.outputs.status }}"
+            echo "- Looked successfully: ${{ steps.resy.outputs.looked }}"
+            echo "- Available: ${{ steps.resy.outputs.available }}"
+            echo ""
+            echo "Attempt log:"
+            if [ -s attempt-log.txt ]; then
+              cat attempt-log.txt
+            else
+              echo "No attempt log was written."
+            fi
+            echo ""
+            echo "Check details:"
+            if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
+              jq -r '
+                [
+                  "Status: " + (.status // "unknown"),
+                  "Looked successfully: " + ((.looked // false) | tostring),
+                  "Checked dates: " + ((.checked // []) | join(", ")),
+                  "",
+                  "Counts:",
+                  (((.counts // []) | map("- \(.date): " + (if .ok then "API ok, \((.rawCount // 0) | tostring) raw slots, \((.matchedCount // 0) | tostring) matched preferences" else "API error" end)) | join("\n"))),
+                  (if ((.errors // []) | length) > 0 then "\nWarnings/errors:\n" + ((.errors // []) | map("- " + .) | join("\n")) else "\nResy API responded successfully for every checked date." end)
+                ] | join("\n")
+              ' result.json
+            else
+              echo "No valid checker JSON was written."
+            fi
+            echo ""
+            echo "Final result JSON:"
+            if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
+              jq . result.json
+            elif [ -s result.json ]; then
+              cat result.json
+            else
+              echo "No result.json was written."
+            fi
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Send email (slots available)
         if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available == 'true'
         uses: dawidd6/action-send-mail@v3
@@ -181,14 +255,10 @@ jobs:
           body: |
             Slots are available for 4 Charles Prime Rib (4 people).
 
-            Started at:
-            ${{ steps.release.outputs.started_at }}
-
             Slots found:
             ${{ steps.resy.outputs.slots }}
 
-            Check details:
-            ${{ steps.resy.outputs.summary }}
+            ${{ steps.email.outputs.body }}
 
             Book here:
             https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4
@@ -209,11 +279,7 @@ jobs:
           body: |
             The checker ran and did not find matching 4-person slots.
 
-            Started at:
-            ${{ steps.release.outputs.started_at }}
-
-            Check details:
-            ${{ steps.resy.outputs.summary }}
+            ${{ steps.email.outputs.body }}
 
             If "Looked successfully" is true and each date says "API ok", Resy responded and the checker was able to inspect availability.
 
@@ -233,11 +299,7 @@ jobs:
           body: |
             The Resy checker hit an error, usually from expired Resy credentials or an API/security response.
 
-            Check details:
-            ${{ steps.resy.outputs.summary }}
-
-            Workflow run:
-            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            ${{ steps.email.outputs.body }}
 
             If the log mentions Resy credentials, pass the Resy security center again and update RESY_AUTH_TOKEN in repo Secrets.
 

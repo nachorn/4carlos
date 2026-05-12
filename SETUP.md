@@ -55,6 +55,8 @@ The workflow is scheduled for 8:57 AM Eastern, then waits inside the job until 9
 
 After 9:00 AM, it checks 30 times, 4 seconds apart. This gives it a better chance to catch slots that appear a few seconds late without hammering Resy all morning.
 
+Every email includes the workflow run link, actual Eastern start time, self-test outcome, Resy check outcome, every polling attempt, the per-date API counts, any Resy errors, and the final checker JSON.
+
 The checked/no-slots email tells you whether Resy responded. If it says `Looked successfully: true` and each date says `API ok`, the checker was able to inspect availability.
 
 If error emails mention Resy credentials or security verification, repeat the Resy credential steps and update `RESY_AUTH_TOKEN`.

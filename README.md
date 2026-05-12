@@ -53,11 +53,17 @@ Manual runs from the Actions tab always run immediately.
 
 The status email includes:
 
+- the GitHub Actions run link
+- trigger type, schedule, branch, and commit
+- actual Eastern start time
+- self-test and Resy-check step outcomes
 - `Looked successfully: true/false`
 - the dates checked
 - whether each date returned an API response
 - raw slot counts and preference-matched counts
 - any Resy credential/security errors
+- every polling attempt with timestamp, exit code, status, looked flag, and availability flag
+- the final checker JSON
 
 ## Local Test
 
