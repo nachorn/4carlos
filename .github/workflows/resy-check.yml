@@ -82,11 +82,11 @@ jobs:
 
       - name: Checkout
         if: steps.window.outputs.should_run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
         if: steps.window.outputs.should_run == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
 
@@ -276,7 +276,7 @@ jobs:
 
       - name: Send email (slots available)
         if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available == 'true'
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v17
         with:
           server_address: smtp.gmail.com
           server_port: 465
@@ -300,7 +300,7 @@ jobs:
 
       - name: Send email (checked, no matching slots)
         if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available != 'true'
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v17
         with:
           server_address: smtp.gmail.com
           server_port: 465
@@ -320,7 +320,7 @@ jobs:
 
       - name: Send email (checker error)
         if: steps.window.outputs.should_run == 'true' && failure() && steps.resy.outcome != 'success'
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v17
         with:
           server_address: smtp.gmail.com
           server_port: 465
