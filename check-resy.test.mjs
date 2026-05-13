@@ -7,6 +7,8 @@ import {
   isPreferredSlot,
   parseSlotMinutes,
   slotMatchesPref,
+  cleanApiKey,
+  cleanAuthToken,
 } from './check-resy.mjs';
 
 test('getDatesToCheck uses the New York calendar day', () => {
@@ -47,4 +49,10 @@ test('isPreferredSlot highlights target windows', () => {
   assert.equal(isPreferredSlot({ time: '8:15 PM' }, '2026-06-01'), true);
   assert.equal(isPreferredSlot({ time: '1:30 PM' }, '2026-06-06'), true);
   assert.equal(isPreferredSlot({ time: '7:00 PM' }, '2026-06-01'), false);
+});
+
+test('credential cleaners tolerate copied header values', () => {
+  assert.equal(cleanApiKey('ResyAPI api_key="abc123"'), 'abc123');
+  assert.equal(cleanApiKey('"abc123"'), 'abc123');
+  assert.equal(cleanAuthToken("'token456'"), 'token456');
 });

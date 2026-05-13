@@ -170,6 +170,21 @@ function extractApiError(data) {
   return typeof message === 'string' ? message : JSON.stringify(message);
 }
 
+function cleanApiKey(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^ResyAPI\s+api_key=/i, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
+function cleanAuthToken(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
 function resyUrl(dateStr) {
   return `https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?date=${dateStr}&seats=${PARTY_SIZE}`;
 }
@@ -212,17 +227,20 @@ async function findAvailability(apiKey, authToken, dateStr) {
   url.searchParams.set('day', dateStr);
   url.searchParams.set('party_size', String(PARTY_SIZE));
   url.searchParams.set('venue_id', String(VENUE_ID));
-  url.searchParams.set('resy_token', authToken);
+  url.searchParams.set('x-resy-auth-token', authToken);
 
   const res = await fetch(url.toString(), {
     method: 'GET',
     headers: {
       Authorization: `ResyAPI api_key="${apiKey}"`,
       'x-resy-auth-token': authToken,
+      'x-resy-universal-auth-token': authToken,
+      'X-Resy-API-Version': '1',
       Origin: 'https://resy.com',
       Referer: 'https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
       'Accept-Language': 'en-US,en;q=0.9',
       'Cache-Control': 'no-cache',
       Pragma: 'no-cache',
@@ -270,8 +288,8 @@ async function findAvailability(apiKey, authToken, dateStr) {
 }
 
 async function main() {
-  const apiKey = process.env.RESY_API_KEY;
-  const authToken = process.env.RESY_AUTH_TOKEN;
+  const apiKey = cleanApiKey(process.env.RESY_API_KEY);
+  const authToken = cleanAuthToken(process.env.RESY_AUTH_TOKEN);
 
   if (!apiKey || !authToken) {
     console.log(JSON.stringify({
@@ -362,4 +380,6 @@ export {
   isWeekend,
   parseSlotMinutes,
   slotMatchesPref,
+  cleanApiKey,
+  cleanAuthToken,
 };
