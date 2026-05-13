@@ -53,7 +53,7 @@ Expected behavior:
 
 ## 5. Daily Schedule
 
-The workflow is scheduled for 8:57 AM Eastern, then waits inside the job until 9:00 AM Eastern before checking Resy. It has two UTC cron entries so it still works when New York switches between daylight saving time and standard time. A guard step prevents duplicate scheduled runs, and each email shows the actual Eastern start time.
+The workflow is scheduled for 8:57 AM Eastern, then waits inside the job until 9:00 AM Eastern before checking Resy. It has two UTC cron entries so it still works when New York switches between daylight saving time and standard time. A guard step prevents duplicate scheduled runs, and each email shows the actual Eastern start time. If GitHub starts the scheduled job late, it still checks immediately and marks `Late schedule start: true` in the email.
 
 After 9:00 AM, it checks 30 times, 4 seconds apart. This gives it a better chance to catch slots that appear a few seconds late without hammering Resy all morning.
 

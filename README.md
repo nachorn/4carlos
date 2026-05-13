@@ -1,6 +1,6 @@
 # 4 Charles Prime Rib - Resy checker
 
-Runs in GitHub Actions so your PC does not need to stay on. It starts just before the 9:00 AM Eastern release window, waits until 9:00 inside the job, then polls Resy for about two minutes.
+Runs in GitHub Actions so your PC does not need to stay on. It starts just before the 9:00 AM Eastern release window, waits until 9:00 inside the job, then polls Resy for about two minutes. If GitHub starts the scheduled job late, it still runs and emails diagnostics instead of silently skipping.
 
 You get an email when slots are found, when the check completes with no matching slots, or when the checker hits a real error. The no-slots email includes diagnostics so you can tell whether Resy actually responded.
 
@@ -45,7 +45,7 @@ GitHub cron runs in UTC, so the workflow has two scheduled entries:
 - `12:57 UTC`, which is 8:57 AM Eastern during daylight saving time.
 - `13:57 UTC`, which is 8:57 AM Eastern during standard time.
 
-A guard step skips the wrong-season duplicate. The real run waits until 9:00 AM Eastern, then performs 30 checks, 4 seconds apart. Each email includes the actual Eastern start time so you can see whether GitHub Actions queued the job late.
+A guard step skips the wrong-season duplicate. The real run waits until 9:00 AM Eastern if GitHub starts it early, then performs 30 checks, 4 seconds apart. If GitHub starts it late, it checks immediately and the email marks `Late schedule start: true`. Each email includes the actual Eastern start time so you can see whether GitHub Actions queued the job late.
 
 This is more reliable than scheduling exactly at 9:00 because GitHub Actions jobs can queue late at the top of the hour.
 

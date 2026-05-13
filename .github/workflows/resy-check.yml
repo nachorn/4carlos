@@ -1,6 +1,7 @@
 # 4 Charles Prime Rib - Resy availability checker
 # Starts before the 9:00 AM Eastern release window, then waits inside the job
 # so the first API checks happen as close to 9:00:00 ET as GitHub allows.
+# If GitHub starts the scheduled run late, still check and email the diagnostics.
 
 name: Resy 4 Charles Check
 
@@ -24,6 +25,7 @@ jobs:
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "manual=true" >> "$GITHUB_OUTPUT"
+            echo "late_start=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -49,11 +51,13 @@ jobs:
             exit 0
           fi
 
-          if { [ "$hour" -eq 8 ] && [ "$minute" -ge 55 ]; } || [ "$hour" -eq 9 ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+
+          if [ "$hour" -gt 9 ] || { [ "$hour" -eq 9 ] && [ "$minute" -gt 0 ]; }; then
+            echo "late_start=true" >> "$GITHUB_OUTPUT"
+            echo "GitHub started this scheduled run after 9:00 AM Eastern. Continuing so diagnostics email is still sent."
           else
-            echo "Skipping because this scheduled run started outside the 8:55-9:59 AM Eastern release window."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "late_start=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Wait until 9 AM Eastern
@@ -221,6 +225,7 @@ jobs:
             echo "- Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo "- Trigger: ${{ github.event_name }}"
             echo "- Schedule: ${{ github.event.schedule }}"
+            echo "- Late schedule start: ${{ steps.window.outputs.late_start }}"
             echo "- Ref: ${{ github.ref_name }}"
             echo "- Commit: ${{ github.sha }}"
             echo "- Started at: ${{ steps.release.outputs.started_at }}"
