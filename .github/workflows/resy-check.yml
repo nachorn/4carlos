@@ -103,6 +103,7 @@ jobs:
           RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
         run: |
           available=false
+          had_success=false
           : > attempt-log.txt
 
           write_outputs() {
@@ -177,8 +178,20 @@ jobs:
                 continue
               fi
 
+              if [ "$had_success" = "true" ]; then
+                echo "Final attempt failed, but an earlier attempt inspected Resy successfully. Reporting the last successful result."
+                cp last-good-result.json result.json
+                write_outputs
+                exit 0
+              fi
+
               write_outputs
               exit "$status"
+            fi
+
+            if [ "$result_looked" = "true" ]; then
+              had_success=true
+              cp result.json last-good-result.json
             fi
 
             if jq -e '.available == true' result.json >/dev/null 2>&1; then
@@ -189,6 +202,11 @@ jobs:
 
             if [ "$i" -lt 30 ]; then sleep 4; fi
           done
+
+          if [ "$available" != "true" ] && [ "$had_success" = "true" ]; then
+            echo "Using last successful Resy response as final no-slots evidence."
+            cp last-good-result.json result.json
+          fi
 
           write_outputs
 

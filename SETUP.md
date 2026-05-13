@@ -61,4 +61,6 @@ Every email includes the workflow run link, actual Eastern start time, self-test
 
 The checked/no-slots email tells you whether Resy responded. If it says `Looked successfully: true` and each date says `API ok`, the checker was able to inspect availability.
 
+If some later attempts show `HTTP 500` but earlier attempts say `Looked successfully: true`, the workflow uses the last successful Resy response as the final result.
+
 If error emails mention `HTTP 419: Unauthorized`, `auth_failed`, Resy credentials, or security verification, repeat the Resy credential steps and update both `RESY_API_KEY` and `RESY_AUTH_TOKEN`. A 419 means the checker reached Resy, but Resy rejected the stored token/key before showing availability.

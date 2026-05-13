@@ -69,6 +69,8 @@ The status email includes:
 
 Auth failures are not retried. If Resy returns 401, 403, 419, or a security/verification page, the workflow sends a checker-error email immediately so you know to refresh the secrets.
 
+Temporary Resy server errors are retried. If at least one polling attempt successfully inspected availability, the workflow reports the last successful result instead of letting a later transient 500 turn the run into a failure.
+
 ## Local Test
 
 Run the no-network self-tests:
