@@ -1,5 +1,5 @@
 # 4 Charles Prime Rib - Resy availability checker
-# Starts before the 9:00 AM Eastern release window, then waits inside the job
+# Starts well before the 9:00 AM Eastern release window, then waits inside the job
 # so the first API checks happen as close to 9:00:00 ET as GitHub allows.
 # If GitHub starts the scheduled run late, still check and email the diagnostics.
 
@@ -7,15 +7,15 @@ name: Resy 4 Charles Check
 
 on:
   schedule:
-    # 8:57 AM Eastern in daylight time and standard time.
-    - cron: '57 12 * * *'
-    - cron: '57 13 * * *'
+    # 6:07 AM Eastern in daylight time and standard time.
+    - cron: '7 10 * * *'
+    - cron: '7 11 * * *'
   workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 240
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -40,9 +40,9 @@ jobs:
           echo "manual=false" >> "$GITHUB_OUTPUT"
 
           if [ "$et_offset" = "-0400" ]; then
-            expected_schedule="57 12 * * *"
+            expected_schedule="7 10 * * *"
           else
-            expected_schedule="57 13 * * *"
+            expected_schedule="7 11 * * *"
           fi
 
           if [ "${{ github.event.schedule }}" != "$expected_schedule" ]; then
@@ -63,15 +63,30 @@ jobs:
       - name: Wait until 9 AM Eastern
         if: steps.window.outputs.should_run == 'true' && steps.window.outputs.manual != 'true'
         run: |
+          last_notice=""
+
           while true; do
+            et_time="$(TZ=America/New_York date '+%H:%M:%S %Z')"
             et_hour="$(TZ=America/New_York date +%H)"
+            et_minute="$(TZ=America/New_York date +%M)"
+            notice_minute="$(TZ=America/New_York date +%H:%M)"
             hour=$((10#$et_hour))
+            minute=$((10#$et_minute))
 
             if [ "$hour" -ge 9 ]; then
               break
             fi
 
-            sleep 1
+            if [ "$notice_minute" != "$last_notice" ]; then
+              echo "Dormant until 9:00 AM Eastern. Current time: $et_time"
+              last_notice="$notice_minute"
+            fi
+
+            if [ "$hour" -eq 8 ] && [ "$minute" -ge 58 ]; then
+              sleep 1
+            else
+              sleep 60
+            fi
           done
 
           echo "Release window reached."
