@@ -339,6 +339,54 @@ jobs:
             echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Call phone (slots available)
+        if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available == 'true'
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_PHONE: ${{ secrets.TWILIO_FROM_PHONE }}
+          ALERT_PHONE: ${{ secrets.ALERT_PHONE }}
+        run: |
+          missing=false
+          for name in TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_PHONE ALERT_PHONE; do
+            if [ -z "${!name}" ]; then
+              echo "::warning::$name is not set; skipping phone call alert."
+              missing=true
+            fi
+          done
+
+          if [ "$missing" = "true" ]; then
+            exit 0
+          fi
+
+          slot_count="$(jq -r '(.slots // []) | length' result.json)"
+          first_slot="$(jq -r 'if ((.slots // []) | length) > 0 then ((.slots[0].date // "unknown date") + " " + (.slots[0].time // "unknown time")) else "unknown time" end' result.json)"
+          message="4 Charles reservation alert. ${slot_count} matching slots found. First slot: ${first_slot}. Check your email and book immediately."
+          twiml="$(jq -nr --arg message "$message" '<Response><Say voice="alice" language="en-US">\($message | @html)</Say><Pause length="1"/><Say voice="alice" language="en-US">4 Charles slots are available. Check your email now.</Say></Response>')"
+
+          response="$(
+            curl -sS -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
+              -u "${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}" \
+              --data-urlencode "To=${ALERT_PHONE}" \
+              --data-urlencode "From=${TWILIO_FROM_PHONE}" \
+              --data-urlencode "Twiml=${twiml}" \
+              --data-urlencode "Timeout=20" \
+              -w '\n%{http_code}'
+          )"
+
+          http_code="$(printf '%s' "$response" | tail -n 1)"
+          body="$(printf '%s' "$response" | sed '$d')"
+
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::warning::Twilio call alert failed with HTTP $http_code."
+            printf '%s\n' "$body"
+            exit 0
+          fi
+
+          call_sid="$(printf '%s' "$body" | jq -r '.sid // "unknown"')"
+          call_status="$(printf '%s' "$body" | jq -r '.status // "unknown"')"
+          echo "Twilio call alert queued: sid=$call_sid status=$call_status"
+
       - name: Send email (slots available)
         if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available == 'true'
         uses: dawidd6/action-send-mail@v17
