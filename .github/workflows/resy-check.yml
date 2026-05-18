@@ -242,6 +242,45 @@ jobs:
           delimiter="EMAIL_BODY_$(date +%s%N)"
           {
             echo "body<<$delimiter"
+            echo "Quick summary:"
+            if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
+              summary_status="$(jq -r '.status // "unknown"' result.json)"
+              summary_looked="$(jq -r '(.looked // false) | tostring' result.json)"
+              summary_available="$(jq -r '(.available // false) | tostring' result.json)"
+              summary_auth_failed="$(jq -r '(.authFailed // false) | tostring' result.json)"
+              summary_raw_count="$(jq -r '[.counts[]?.rawCount // 0] | add // 0' result.json)"
+              summary_matched_count="$(jq -r '[.counts[]?.matchedCount // 0] | add // 0' result.json)"
+              summary_error_count="$(jq -r '(.errors // []) | length' result.json)"
+              summary_checked_dates="$(jq -r '(.checked // []) | join(", ")' result.json)"
+              summary_first_slot="$(jq -r 'if ((.slots // []) | length) > 0 then ((.slots[0].date // "unknown date") + " " + (.slots[0].time // "unknown time")) else "none" end' result.json)"
+              summary_first_error="$(jq -r '(.errors // [])[0] // "none"' result.json)"
+
+              if [ "$summary_available" = "true" ]; then
+                summary_outcome="slots found"
+              elif [ "$summary_auth_failed" = "true" ]; then
+                summary_outcome="auth failed"
+              elif [ "$summary_looked" = "true" ] && [ "$summary_error_count" -gt 0 ]; then
+                summary_outcome="checked with some Resy errors"
+              elif [ "$summary_looked" = "true" ]; then
+                summary_outcome="checked, no matching slots"
+              else
+                summary_outcome="checker error"
+              fi
+
+              echo "- Outcome: $summary_outcome ($summary_status)"
+              echo "- Slots: $summary_matched_count matching from $summary_raw_count raw"
+              echo "- First matching slot: $summary_first_slot"
+              echo "- Looked successfully: $summary_looked"
+              echo "- Errors: $summary_error_count"
+              echo "- First error: $summary_first_error"
+              echo "- Auth failed: $summary_auth_failed"
+              echo "- Checked dates: $summary_checked_dates"
+            else
+              echo "- Outcome: checker did not produce valid JSON"
+              echo "- Slots: unknown"
+              echo "- Errors: result.json missing or invalid"
+            fi
+            echo ""
             echo "Run metadata:"
             echo "- Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo "- Trigger: ${{ github.event_name }}"
