@@ -175,14 +175,20 @@ jobs:
               result_looked="$(jq -r '(.looked // false) | tostring' result.json)"
               result_available="$(jq -r '(.available // false) | tostring' result.json)"
               result_auth_failed="$(jq -r '(.authFailed // false) | tostring' result.json)"
+              result_raw_count="$(jq -r '[.counts[]?.rawCount // 0] | add // 0' result.json)"
+              result_matched_count="$(jq -r '[.counts[]?.matchedCount // 0] | add // 0' result.json)"
+              result_date_counts="$(jq -r '(.counts // []) | map(.date + ":" + (if .ok then "raw=" + ((.rawCount // 0) | tostring) + ",matched=" + ((.matchedCount // 0) | tostring) else "error=" + (.errorType // "unknown") end)) | join("; ")' result.json)"
             else
               result_status="invalid_result"
               result_looked="false"
               result_available="false"
               result_auth_failed="false"
+              result_raw_count="0"
+              result_matched_count="0"
+              result_date_counts="no valid JSON"
             fi
 
-            echo "Attempt $i at $attempt_time: exit=$status, status=$result_status, looked=$result_looked, authFailed=$result_auth_failed, available=$result_available" >> attempt-log.txt
+            echo "Attempt $i at $attempt_time: exit=$status, status=$result_status, looked=$result_looked, authFailed=$result_auth_failed, available=$result_available, rawSlots=$result_raw_count, matchedSlots=$result_matched_count, dates=[$result_date_counts]" >> attempt-log.txt
 
             if [ "$status" -ne 0 ]; then
               echo "Checker returned status $status."
