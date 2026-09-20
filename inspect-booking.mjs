@@ -3,6 +3,9 @@ import { cleanApiKey, cleanAuthToken } from './check-resy.mjs';
 const headers = {
   Authorization: `ResyAPI api_key="${cleanApiKey(process.env.RESY_API_KEY)}"`,
   'x-resy-auth-token': cleanAuthToken(process.env.RESY_AUTH_TOKEN),
+  'x-resy-universal-auth-token': cleanAuthToken(process.env.RESY_AUTH_TOKEN),
+  'X-Resy-API-Version': '1',
+  Accept: 'application/json',
   Origin: 'https://resy.com', Referer: 'https://resy.com/',
   'Content-Type': 'application/json',
 };
@@ -16,7 +19,7 @@ async function request(path, body) {
   return response.json();
 }
 const date = '2026-09-26';
-const data = await request('/4/find?lat=0&long=0&day=2026-09-26&party_size=2&venue_id=1927');
+const data = await request('/4/find', {lat:0, long:0, day:date, party_size:2, venue_id:1927});
 const venues = data?.results?.venues;
 if (!Array.isArray(venues)) throw new Error('Unknown availability shape');
 for (const venue of venues) {
@@ -25,7 +28,7 @@ for (const venue of venues) {
   if (!slots.length) continue;
   const detail = await request('/3/details', {config_id:slots[0].config.token, day:date, party_size:'2'});
   console.log(JSON.stringify({detailKeys:Object.keys(detail)}));
-  for (const key of ['payment','cancellation','cancel','terms','policies','reservation','resy','venue','display_values']) {
+  for (const key of ['payment','cancellation','cancel','terms','policies','display_values']) {
     if (detail[key] !== undefined) console.log(JSON.stringify({ [key]: detail[key] }));
   }
 }
