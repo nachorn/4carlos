@@ -7,9 +7,12 @@ name: Resy 4 Charles Check
 
 on:
   schedule:
-    # 6:07 AM Eastern in daylight time and standard time.
-    - cron: '7 10 * * *'
-    - cron: '7 11 * * *'
+    # Primary 6:11 AM Eastern; backup 8:17 AM Eastern.
+    # Both wait for 9 AM. Skip the UTC variants for the other season.
+    - cron: '11 10 * * *'
+    - cron: '11 11 * * *'
+    - cron: '17 12 * * *'
+    - cron: '17 13 * * *'
   workflow_dispatch:
     inputs:
       booking_test:
@@ -31,6 +34,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   check:
@@ -50,8 +54,18 @@ jobs:
             exit 2
           fi
 
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
       - name: Prepare release window
         id: window
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
@@ -71,13 +85,21 @@ jobs:
           echo "manual=false" >> "$GITHUB_OUTPUT"
 
           if [ "$et_offset" = "-0400" ]; then
-            expected_schedule="7 10 * * *"
+            expected_schedule="11 10 * * *"
+            backup_schedule="17 12 * * *"
           else
-            expected_schedule="7 11 * * *"
+            expected_schedule="11 11 * * *"
+            backup_schedule="17 13 * * *"
           fi
 
-          if [ "${{ github.event.schedule }}" != "$expected_schedule" ]; then
+          if [ "${{ github.event.schedule }}" != "$expected_schedule" ] && [ "${{ github.event.schedule }}" != "$backup_schedule" ]; then
             echo "Skipping wrong-season UTC schedule."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$(node schedule-guard.mjs)" = "true" ]; then
+            echo "A scheduled check already completed today; skipping duplicate start."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -90,16 +112,6 @@ jobs:
           else
             echo "late_start=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Checkout
-        if: steps.window.outputs.should_run == 'true'
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        if: steps.window.outputs.should_run == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
 
       - name: Run self-tests
         if: steps.window.outputs.should_run == 'true'
@@ -160,6 +172,11 @@ jobs:
           started_at="$(TZ=America/New_York date '+%Y-%m-%d %H:%M:%S %Z')"
           echo "Starting checks at $started_at"
           echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+          if [[ "$(TZ=America/New_York date +%H:%M:%S)" > "09:00:10" ]]; then
+            echo "late_start=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "late_start=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check Resy availability
         if: steps.window.outputs.should_run == 'true'
@@ -172,6 +189,7 @@ jobs:
           available=false
           had_success=false
           : > attempt-log.txt
+          : > observations.jsonl
 
           write_outputs() {
             echo "available=$available" >> "$GITHUB_OUTPUT"
@@ -219,6 +237,7 @@ jobs:
             cat result.json
 
             if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
+              jq -c --arg observed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {observedAt: $observed_at}' result.json >> observations.jsonl
               result_status="$(jq -r '.status // "unknown"' result.json)"
               result_looked="$(jq -r '(.looked // false) | tostring' result.json)"
               result_available="$(jq -r '(.available // false) | tostring' result.json)"
@@ -228,6 +247,7 @@ jobs:
               result_date_counts="$(jq -r '(.counts // []) | map(.date + ":" + (if .ok then "raw=" + ((.rawCount // 0) | tostring) + ",matched=" + ((.matchedCount // 0) | tostring) else "error=" + (.errorType // "unknown") end)) | join("; ")' result.json)"
             else
               result_status="invalid_result"
+              echo '{"looked":false,"available":false,"errors":["Checker returned invalid JSON"]}' >> observations.jsonl
               result_looked="false"
               result_available="false"
               result_auth_failed="false"
@@ -299,6 +319,14 @@ jobs:
           echo "status=$(jq -r '.status // "booking_needs_attention"' booking-result.json)" >> "$GITHUB_OUTPUT"
           exit "$status"
 
+      - name: Summarize daily outcome
+        if: steps.window.outputs.should_run == 'true' && always()
+        id: daily
+        env:
+          LATE_START: ${{ steps.release.outputs.late_start }}
+          VALIDATE_ONLY: ${{ inputs.validate_only }}
+        run: node daily-outcome.mjs
+
       - name: Build email diagnostics
         if: steps.window.outputs.should_run == 'true' && always()
         id: email
@@ -306,6 +334,10 @@ jobs:
           delimiter="EMAIL_BODY_$(date +%s%N)"
           {
             echo "body<<$delimiter"
+            if [ -s daily-outcome.txt ]; then
+              cat daily-outcome.txt
+              echo ""
+            fi
             echo "Quick summary:"
             if [ -s result.json ] && jq -e . result.json >/dev/null 2>&1; then
               summary_status="$(jq -r '.status // "unknown"' result.json)"
@@ -349,7 +381,7 @@ jobs:
             echo "- Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo "- Trigger: ${{ github.event_name }}"
             echo "- Schedule: ${{ github.event.schedule }}"
-            echo "- Late schedule start: ${{ steps.window.outputs.late_start }}"
+            echo "- Late check start: ${{ steps.release.outputs.late_start }}"
             echo "- Ref: ${{ github.ref_name }}"
             echo "- Commit: ${{ github.sha }}"
             echo "- Started at: ${{ steps.release.outputs.started_at }}"
@@ -419,9 +451,9 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib - ${{ steps.booking.outputs.status == 'booked' && 'Reservation booked' || 'Slots available' }}"
+          subject: "4 Charles Prime Rib - ${{ steps.daily.outputs.outcome || 'Booking outcome unavailable' }}"
           body: |
-            Slots are available for 4 Charles Prime Rib (4 people).
+            Matching tables were observed for 4 Charles Prime Rib (4 people).
             Automatic booking result: ${{ steps.booking.outputs.status || 'not attempted' }}.
             Only 'booked' means a reservation was confirmed. If the result needs attention,
             check your Resy account before manually booking another table.
@@ -446,7 +478,7 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib - Checked, no matching slots"
+          subject: "4 Charles Prime Rib - ${{ steps.daily.outputs.outcome || 'Check outcome unavailable' }}"
           body: |
             The checker ran and did not find matching 4-person slots.
 
@@ -466,7 +498,7 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib - Checker error"
+          subject: "4 Charles Prime Rib - ${{ steps.daily.outputs.outcome || 'Checker error' }}"
           body: |
             The Resy checker hit an error, usually from expired Resy credentials or an API/security response.
 
@@ -501,13 +533,13 @@ jobs:
 
           slot_count="$(jq -r '(.slots // []) | length' result.json)"
           first_slot="$(jq -r 'if ((.slots // []) | length) > 0 then ((.slots[0].date // "unknown date") + " " + (.slots[0].time // "unknown time")) else "unknown time" end' result.json)"
-          message="4 Charles reservation alert. ${slot_count} matching slots found. First slot: ${first_slot}. Check your email and book immediately."
+          message="4 Charles reservation alert. ${slot_count} matching slots were observed. First slot: ${first_slot}. Check your email for the booking result."
           if [ "${BOOKING_STATUS:-}" = "booked" ]; then
             message="4 Charles reservation booked and confirmed. Check your email and Resy account for the details."
           elif [ "${BOOKING_STATUS:-}" = "booking_needs_attention" ] || [ "${BOOKING_STATUS:-}" = "booking_locked" ]; then
             message="4 Charles booking needs attention. Check your Resy account before making another reservation."
           fi
-          twiml="$(jq -nr --arg message "$message" '"<Response><Say voice=\"alice\" language=\"en-US\">\($message | @html)</Say><Pause length=\"1\"/><Say voice=\"alice\" language=\"en-US\">4 Charles slots are available. Check your email now.</Say></Response>"')"
+          twiml="$(jq -nr --arg message "$message" '"<Response><Say voice=\"alice\" language=\"en-US\">\($message | @html)</Say><Pause length=\"1\"/><Say voice=\"alice\" language=\"en-US\">Check your email for the reservation result.</Say></Response>"')"
 
           if ! response="$(
             curl -sS --connect-timeout 5 --max-time 15 -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
@@ -534,3 +566,17 @@ jobs:
           call_sid="$(printf '%s' "$body" | jq -r '.sid // "unknown"')"
           call_status="$(printf '%s' "$body" | jq -r '.status // "unknown"')"
           echo "Twilio call alert queued: sid=$call_sid status=$call_status"
+
+      - name: Save daily evidence
+        if: steps.window.outputs.should_run == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resy-daily-outcome-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            daily-outcome.json
+            daily-outcome.txt
+            observations.jsonl
+            attempt-log.txt
+            booking-result.json

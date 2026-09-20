@@ -83,6 +83,13 @@ test('ambiguous booking without account evidence stops and retains its lock',asy
   assert.deepEqual(f.calls,['claim','book']);
 });
 
+test('explicit sold-out rejection is reported after account reconciliation without retrying',async()=>{
+  const f=fixture();f.client.book=async()=>{f.calls.push('book');const error=new Error('Sold out');error.status=404;throw error;};
+  const result=await runBooking({...f,test:true});
+  assert.equal(result.status,'booking_not_secured');
+  assert.deepEqual(f.calls,['claim','book','booking_not_secured']);
+});
+
 test('cancellation failure never reports test success',async()=>{
   const f=fixture();f.client.cancel=async()=>{throw new Error('HTTP 500');};
   await assert.rejects(runBooking({...f,test:true}),/may remain active/);

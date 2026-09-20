@@ -5,6 +5,42 @@ New York. It checks three dates (20, 21 and 22 days ahead), up to 30 times with
 four seconds between attempts. GitHub can delay scheduled jobs, so exact release
 timing is not guaranteed.
 
+The primary schedule starts at 6:11 AM Eastern, with an 8:17 AM backup. Both wait
+until 9 AM. The UTC schedules are filtered for daylight/standard time. The shared
+concurrency group serializes runs, and a later start skips the check if a successful
+scheduled run already actually checked Resy that New York calendar day. Skipped
+wrong-season runs and manual credential tests do not count. A GitHub history lookup
+failure allows the check to proceed, with the existing durable booking lock still
+preventing duplicate reservations.
+
+On September 20, 2026, no scheduled run appeared in GitHub's history, despite the
+workflow being enabled. The later successful checks were manually dispatched.
+GitHub did not provide a cause for the absent trigger. The cron definitions were
+updated and the backup added, but a future scheduled run is needed to verify
+delivery. GitHub can delay or drop schedule events; this backup uses the same
+scheduler and is not an independent guarantee.
+
+## Daily outcome report
+
+Email subjects and the Actions run summary distinguish confirmed bookings,
+observed tables that were not booked, unknown booking outcomes, fee-policy blocks,
+existing reservations, tables outside preferences, and checks with no observed
+tables. A table that disappears before the booker rechecks is reported separately
+from a Resy HTTP 404 booking rejection. Lost or ambiguous responses remain unknown,
+with instructions to check the account before another attempt.
+
+Every valid checker result is preserved in `observations.jsonl`, so an earlier
+observation is not lost when a later attempt fails or returns no tables. Reports
+include observation times, check count and a late-start warning when the check
+begins more than ten seconds after 9 AM Eastern. This cannot establish whether a
+table existed before checking began or between requests. The checker watches the
+configured three release dates; it is not an all-day or all-date availability log.
+
+Each active run uploads its daily outcome, observations, attempt log and booking
+result as an Actions artifact retained for 30 days. These files exclude Resy auth,
+booking and cancellation tokens and account/payment details. Validation-only runs
+build the same report without sending email or attempting bookings.
+
 Matching slots on one date are still reported if another date fails. Date-specific
 errors remain in the diagnostics. Email runs before the optional phone call, and
 failure of one notification does not prevent the other from being attempted.
