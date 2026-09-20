@@ -337,7 +337,8 @@ async function main() {
     }
   }
 
-  const authFailed = authErrors.length > 0 && authErrors.length === errors.length;
+  // A failed date must not suppress slots returned by a successful date.
+  const authFailed = authErrors.length === dates.length;
   allSlots.sort((a, b) => {
     if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
     return `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`);
