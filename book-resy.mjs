@@ -54,10 +54,16 @@ export async function runBooking({client, journal, test = false, dates = getDate
   }
   candidates.sort((a,b) => Number(b.preferred)-Number(a.preferred) || a.slot.date.start.localeCompare(b.slot.date.start));
   const skipped = new Set();
+  const blockedSlots = [];
   for (const {slot,date} of candidates.slice(0,20)) {
     const detail = await client.details(slot,date,target.partySize);
     const reason = checkFees(slot,detail,target.maxTotal);
-    if (reason) { skipped.add(reason); continue; }
+    if (reason) {
+      skipped.add(reason);
+      blockedSlots.push({date,time:slot.date.start,reason,total:detail.payment?.amounts?.total,
+        cancellationPolicy:detail.cancellation?.display?.policy});
+      continue;
+    }
     if (typeof detail.book_token?.value !== 'string' || !detail.book_token.value) throw new Error('Missing fresh book token');
     let paymentId;
     if (detail.payment.amounts.total > 0) {
@@ -68,12 +74,14 @@ export async function runBooking({client, journal, test = false, dates = getDate
     if ((await client.upcoming()).some(r => venueId(r) === target.venueId)) return {status:'existing_reservation'};
     await journal.claim({venueId:target.venueId,date,time:slot.date.start,partySize:target.partySize,test});
     let booked;
+    let bookingFailure;
     let confirmed = false;
     let cancellationVerified = false;
     try {
       try {
         booked = await client.book(detail.book_token.value,paymentId);
-      } catch {
+      } catch (error) {
+        bookingFailure = error;
         // A timeout can hide a successful booking. Reconcile; never resubmit.
       }
       const after = await client.upcoming();
@@ -82,7 +90,11 @@ export async function runBooking({client, journal, test = false, dates = getDate
         booked = {...booked,...created[0],resy_token:created[0].resy_token || booked?.resy_token};
         confirmed = true;
       }
-      if (!confirmed) throw new Error('Booking outcome uncertain; inspect Resy account. Automatic retries are locked.');
+      if (!confirmed && bookingFailure?.status === 404 && created.length === 0) {
+        await journal.finish('booking_not_secured');
+        return {status:'booking_not_secured',date,time:slot.date.start,reason:'Resy rejected the booking with HTTP 404: the slot was no longer bookable. No matching new reservation was found in the account.'};
+      }
+      if (!confirmed) throw new Error('Booking outcome uncertain; inspect Resy account. Automatic retries are locked.' + (bookingFailure?.status ? ' Resy HTTP '+bookingFailure.status+'.' : ''));
     } finally {
       if (test && booked?.resy_token) {
         try { await client.cancel(booked.resy_token); } catch { /* Verify even if cancellation response is lost. */ }
@@ -95,7 +107,7 @@ export async function runBooking({client, journal, test = false, dates = getDate
     await journal.finish(status);
     return {status,date,time:slot.date.start,partySize:target.partySize,total:detail.payment.amounts.total,confirmed,cancellationVerified};
   }
-  return {status:candidates.length ? 'booking_blocked_by_policy' : 'no_bookable_slots',reasons:[...skipped]};
+  return {status:candidates.length ? 'booking_blocked_by_policy' : 'no_bookable_slots',reasons:[...skipped],blockedSlots};
 }
 
 async function main() {
