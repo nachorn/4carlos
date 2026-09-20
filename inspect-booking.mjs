@@ -6,6 +6,7 @@ const headers = {
   'x-resy-universal-auth-token': cleanAuthToken(process.env.RESY_AUTH_TOKEN),
   'X-Resy-API-Version': '1',
   Accept: 'application/json',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   Origin: 'https://resy.com', Referer: 'https://resy.com/',
   'Content-Type': 'application/json',
 };
@@ -15,11 +16,15 @@ async function request(path, body) {
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(10000),
   });
-  if (!response.ok) throw new Error(`Resy HTTP ${response.status}`);
+  if (!response.ok) {
+    const text = await response.text();
+    // Report only the response format, never an arbitrary response body.
+    throw new Error(`Resy HTTP ${response.status}; content-type=${response.headers.get('content-type')}; JSON=${text.trim().startsWith('{')}`);
+  }
   return response.json();
 }
 const date = '2026-09-26';
-const data = await request('/4/find', {lat:0, long:0, day:date, party_size:2, venue_id:1927});
+const data = await request('/4/find?lat=0&long=0&day=2026-09-26&party_size=2&venue_id=1927');
 const venues = data?.results?.venues;
 if (!Array.isArray(venues)) throw new Error('Unknown availability shape');
 for (const venue of venues) {
