@@ -1,8 +1,4 @@
 {
-  "venueId": 1927,
-  "date": "2026-09-26",
-  "time": "2026-09-26 19:00:00",
-  "partySize": 2,
-  "test": true,
-  "status": "pending"
+  "status": "test_booked_and_cancelled",
+  "updatedAt": "2026-09-20T04:13:49.445Z"
 }
