@@ -11,6 +11,11 @@ on:
     - cron: '7 10 * * *'
     - cron: '7 11 * * *'
   workflow_dispatch:
+    inputs:
+      validate_only:
+        description: 'Check Resy once without sending email or phone alerts'
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -60,6 +65,21 @@ jobs:
             echo "late_start=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Checkout
+        if: steps.window.outputs.should_run == 'true'
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        if: steps.window.outputs.should_run == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Run self-tests
+        if: steps.window.outputs.should_run == 'true'
+        id: run_self_tests
+        run: node --test
+
       - name: Wait until 9 AM Eastern
         if: steps.window.outputs.should_run == 'true' && steps.window.outputs.manual != 'true'
         run: |
@@ -99,27 +119,13 @@ jobs:
           echo "Starting checks at $started_at"
           echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout
-        if: steps.window.outputs.should_run == 'true'
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        if: steps.window.outputs.should_run == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Run self-tests
-        if: steps.window.outputs.should_run == 'true'
-        id: run_self_tests
-        run: node --test check-resy.test.mjs
-
-      - name: Check Resy availability (30 tries, 4s apart)
+      - name: Check Resy availability
         if: steps.window.outputs.should_run == 'true'
         id: resy
         env:
           RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
           RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
+          MAX_ATTEMPTS: ${{ inputs.validate_only && '1' || '30' }}
         run: |
           available=false
           had_success=false
@@ -159,7 +165,7 @@ jobs:
             fi
           }
 
-          for i in $(seq 1 30); do
+          for i in $(seq 1 "$MAX_ATTEMPTS"); do
             attempt_time="$(TZ=America/New_York date '+%H:%M:%S %Z')"
             echo "Attempt $i at $attempt_time"
 
@@ -198,7 +204,7 @@ jobs:
                 exit "$status"
               fi
 
-              if [ "$i" -lt 30 ]; then
+              if [ "$i" -lt "$MAX_ATTEMPTS" ]; then
                 sleep 4
                 continue
               fi
@@ -225,7 +231,7 @@ jobs:
               break
             fi
 
-            if [ "$i" -lt 30 ]; then sleep 4; fi
+            if [ "$i" -lt "$MAX_ATTEMPTS" ]; then sleep 4; fi
           done
 
           if [ "$available" != "true" ] && [ "$had_success" = "true" ]; then
@@ -339,56 +345,8 @@ jobs:
             echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Call phone (slots available)
-        if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available == 'true'
-        env:
-          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-          TWILIO_FROM_PHONE: ${{ secrets.TWILIO_FROM_PHONE }}
-          ALERT_PHONE: ${{ secrets.ALERT_PHONE }}
-        run: |
-          missing=false
-          for name in TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_PHONE ALERT_PHONE; do
-            if [ -z "${!name}" ]; then
-              echo "::warning::$name is not set; skipping phone call alert."
-              missing=true
-            fi
-          done
-
-          if [ "$missing" = "true" ]; then
-            exit 0
-          fi
-
-          slot_count="$(jq -r '(.slots // []) | length' result.json)"
-          first_slot="$(jq -r 'if ((.slots // []) | length) > 0 then ((.slots[0].date // "unknown date") + " " + (.slots[0].time // "unknown time")) else "unknown time" end' result.json)"
-          message="4 Charles reservation alert. ${slot_count} matching slots found. First slot: ${first_slot}. Check your email and book immediately."
-          twiml="$(jq -nr --arg message "$message" '<Response><Say voice="alice" language="en-US">\($message | @html)</Say><Pause length="1"/><Say voice="alice" language="en-US">4 Charles slots are available. Check your email now.</Say></Response>')"
-
-          response="$(
-            curl -sS -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
-              -u "${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}" \
-              --data-urlencode "To=${ALERT_PHONE}" \
-              --data-urlencode "From=${TWILIO_FROM_PHONE}" \
-              --data-urlencode "Twiml=${twiml}" \
-              --data-urlencode "Timeout=20" \
-              -w '\n%{http_code}'
-          )"
-
-          http_code="$(printf '%s' "$response" | tail -n 1)"
-          body="$(printf '%s' "$response" | sed '$d')"
-
-          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
-            echo "::warning::Twilio call alert failed with HTTP $http_code."
-            printf '%s\n' "$body"
-            exit 0
-          fi
-
-          call_sid="$(printf '%s' "$body" | jq -r '.sid // "unknown"')"
-          call_status="$(printf '%s' "$body" | jq -r '.status // "unknown"')"
-          echo "Twilio call alert queued: sid=$call_sid status=$call_status"
-
       - name: Send email (slots available)
-        if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available == 'true'
+        if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome == 'success' && steps.resy.outputs.available == 'true' }}
         uses: dawidd6/action-send-mail@v17
         with:
           server_address: smtp.gmail.com
@@ -412,7 +370,7 @@ jobs:
             Resy 4 Charles checker - GitHub Actions
 
       - name: Send email (checked, no matching slots)
-        if: steps.window.outputs.should_run == 'true' && success() && steps.resy.outputs.available != 'true'
+        if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome == 'success' && steps.resy.outputs.available != 'true' }}
         uses: dawidd6/action-send-mail@v17
         with:
           server_address: smtp.gmail.com
@@ -432,7 +390,7 @@ jobs:
             Resy 4 Charles checker - GitHub Actions
 
       - name: Send email (checker error)
-        if: steps.window.outputs.should_run == 'true' && failure() && steps.resy.outcome != 'success'
+        if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome != 'success' }}
         uses: dawidd6/action-send-mail@v17
         with:
           server_address: smtp.gmail.com
@@ -450,3 +408,56 @@ jobs:
             If the log mentions Resy credentials, pass the Resy security center again and update RESY_AUTH_TOKEN in repo Secrets.
 
             Resy 4 Charles checker - GitHub Actions
+
+      - name: Call phone (slots available)
+        if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome == 'success' && steps.resy.outputs.available == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_PHONE: ${{ secrets.TWILIO_FROM_PHONE }}
+          ALERT_PHONE: ${{ secrets.ALERT_PHONE }}
+        run: |
+          missing=false
+          for name in TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_PHONE ALERT_PHONE; do
+            if [ -z "${!name}" ]; then
+              echo "::warning::$name is not set; skipping phone call alert."
+              missing=true
+            fi
+          done
+
+          if [ "$missing" = "true" ]; then
+            exit 0
+          fi
+
+          slot_count="$(jq -r '(.slots // []) | length' result.json)"
+          first_slot="$(jq -r 'if ((.slots // []) | length) > 0 then ((.slots[0].date // "unknown date") + " " + (.slots[0].time // "unknown time")) else "unknown time" end' result.json)"
+          message="4 Charles reservation alert. ${slot_count} matching slots found. First slot: ${first_slot}. Check your email and book immediately."
+          twiml="$(jq -nr --arg message "$message" '"<Response><Say voice=\"alice\" language=\"en-US\">\($message | @html)</Say><Pause length=\"1\"/><Say voice=\"alice\" language=\"en-US\">4 Charles slots are available. Check your email now.</Say></Response>"')"
+
+          if ! response="$(
+            curl -sS --connect-timeout 5 --max-time 15 -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
+              -u "${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}" \
+              --data-urlencode "To=${ALERT_PHONE}" \
+              --data-urlencode "From=${TWILIO_FROM_PHONE}" \
+              --data-urlencode "Twiml=${twiml}" \
+              --data-urlencode "Timeout=20" \
+              -w '\n%{http_code}'
+          )"; then
+            echo "::warning::Twilio call alert failed to connect."
+            exit 1
+          fi
+
+          http_code="$(printf '%s' "$response" | tail -n 1)"
+          body="$(printf '%s' "$response" | sed '$d')"
+
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::warning::Twilio call alert failed with HTTP $http_code."
+            printf '%s\n' "$body"
+            exit 1
+          fi
+
+          call_sid="$(printf '%s' "$body" | jq -r '.sid // "unknown"')"
+          call_status="$(printf '%s' "$body" | jq -r '.status // "unknown"')"
+          echo "Twilio call alert queued: sid=$call_sid status=$call_status"
