@@ -63,9 +63,26 @@ function runChecker(responses, credentials = true) {
   // Run the real CLI with a mocked transport; no network or real secrets.
   const preload = `
     const responses = ${JSON.stringify(responses)};
-    globalThis.fetch = async () => {
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    AbortSignal.timeout = (ms) => {
+      if (ms !== 10000) throw new Error('Unexpected request timeout');
+      return timeout(20);
+    };
+    globalThis.fetch = async (url, options) => {
+      if (options.method !== 'GET' || new URL(url).pathname !== '/4/find') {
+        throw new Error('Checker must only read availability');
+      }
       const response = responses.shift();
       if (!response) throw new Error('Unexpected extra request');
+      if (response.hang) {
+        return new Promise((resolve, reject) => {
+          const hold = setTimeout(() => reject(new Error('Request was not aborted')), 1000);
+          options.signal.addEventListener('abort', () => {
+            clearTimeout(hold);
+            reject(options.signal.reason);
+          }, { once: true });
+        });
+      }
       if (response.error) throw new Error(response.error);
       return new Response(JSON.stringify(response.body || {}), {
         status: response.status || 200,
@@ -133,4 +150,51 @@ test('CLI rejects missing credentials before making requests', () => {
   const { code, output } = runChecker([], false);
   assert.equal(code, 3);
   assert.equal(output.status, 'missing_credentials');
+});
+
+test('CLI aborts stalled requests and reports timeouts for each date', () => {
+  const { code, output } = runChecker(Array(3).fill({ hang: true }));
+  assert.equal(code, 2);
+  assert.equal(output.looked, false);
+  assert.ok(output.counts.every((count) => count.errorType === 'timeout'));
+  assert.ok(output.errors.every((message) => message.includes('timed out after 10 seconds')));
+});
+
+test('empty availability does not turn venue metadata into a slot', () => {
+  const data = { results: { venues: [{ venue: { config: { type: 'metadata' } }, slots: [] }] } };
+  assert.deepEqual(extractSlots(data), []);
+  const { code, output } = runChecker(Array(3).fill({ body: data }));
+  assert.equal(code, 0);
+  assert.equal(output.available, false);
+  assert.equal(output.status, 'checked_no_slots');
+});
+
+test('unknown and malformed response shapes fail instead of claiming no slots', () => {
+  for (const body of [{}, { token: 'not-a-slot' }, { slots: 'invalid' }, { results: { venues: {} } }]) {
+    assert.throws(() => extractSlots(body), /Unexpected Resy/);
+    const { code, output } = runChecker(Array(3).fill({ body }));
+    assert.equal(code, 2);
+    assert.equal(output.looked, false);
+    assert.equal(output.status, 'check_failed');
+  }
+});
+
+test('slot time parsing handles noon, midnight and dated AM/PM times', () => {
+  for (const [time, minutes] of [['12 AM', 0], ['12 PM', 720], ['2026-06-01 8:30 PM', 1230], ['8:30 p.m.', 1230]]) {
+    assert.equal(parseSlotMinutes({ time }), minutes);
+  }
+  for (const time of ['25:00', '20:99', '20:00:99', '13 PM', '0 AM', '8:70 PM', '20:30 garbage']) {
+    assert.equal(parseSlotMinutes({ time }), null);
+  }
+});
+
+test('preference windows include their exact boundaries only', () => {
+  const weekday = '2026-06-01';
+  const weekend = '2026-06-06';
+  for (const [time, expected] of [['18:29', false], ['18:30', true], ['23:00', true], ['23:01', false]]) {
+    assert.equal(slotMatchesPref({ time }, weekday), expected);
+  }
+  for (const [time, expected] of [['11:59', false], ['12:00', true], ['16:00', true], ['16:01', false]]) {
+    assert.equal(slotMatchesPref({ time }, weekend), expected);
+  }
 });

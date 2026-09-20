@@ -12,6 +12,10 @@ on:
     - cron: '7 11 * * *'
   workflow_dispatch:
     inputs:
+      inspect_booking:
+        description: 'Read checkout fee diagnostics without booking or sending alerts'
+        type: boolean
+        default: false
       validate_only:
         description: 'Check Resy once without sending email or phone alerts'
         type: boolean
@@ -79,6 +83,13 @@ jobs:
         if: steps.window.outputs.should_run == 'true'
         id: run_self_tests
         run: node --test
+
+      - name: Inspect booking terms
+        if: inputs.inspect_booking && inputs.validate_only
+        env:
+          RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
+          RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
+        run: node inspect-booking.mjs
 
       - name: Wait until 9 AM Eastern
         if: steps.window.outputs.should_run == 'true' && steps.window.outputs.manual != 'true'
