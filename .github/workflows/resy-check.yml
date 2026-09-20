@@ -17,7 +17,7 @@ on:
         type: boolean
         default: false
       inspect_booking:
-        description: 'Read checkout fee diagnostics without booking or sending alerts'
+        description: 'Inspect 4 Charles availability and checkout fees across 21 days (requires validate_only)'
         type: boolean
         default: false
       validate_only:
