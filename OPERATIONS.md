@@ -50,7 +50,9 @@ Evidence: https://github.com/nachorn/4carlos/actions/runs/35488600598
 
 The manual `booking_test` input requires `validate_only: true` and uses that exact
 test reservation with a zero-fee limit. A separate permanent test journal prevents
-accidental repetition. `inspect_booking` only reads checkout policy metadata.
+accidental repetition. `inspect_booking` checks four-person availability at
+4 Charles from today through 21 days ahead, and reads checkout policy metadata
+for a real returned slot on each available date. It never books or cancels.
 Ordinary validation-only runs never book, cancel, email or call.
 
 Network requests time out after ten seconds. Unknown availability responses are

@@ -1,41 +1,45 @@
-// Read-only checkout diagnostics. Never print credentials, book tokens or user data.
-import { cleanApiKey, cleanAuthToken } from './check-resy.mjs';
-const headers = {
-  Authorization: `ResyAPI api_key="${cleanApiKey(process.env.RESY_API_KEY)}"`,
-  'x-resy-auth-token': cleanAuthToken(process.env.RESY_AUTH_TOKEN),
-  'x-resy-universal-auth-token': cleanAuthToken(process.env.RESY_AUTH_TOKEN),
-  'X-Resy-API-Version': '1',
-  Accept: 'application/json',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  Origin: 'https://resy.com', Referer: 'https://resy.com/',
-  'Content-Type': 'application/json',
-};
-async function request(path, body) {
-  const response = await fetch(`https://api.resy.com${path}`, {
-    method: body ? 'POST' : 'GET', headers,
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    // Report only the response format, never an arbitrary response body.
-    throw new Error(`Resy HTTP ${response.status}; content-type=${response.headers.get('content-type')}; JSON=${text.trim().startsWith('{')}`);
+// Read-only 4 Charles checkout diagnostics. Never book, cancel, or print tokens.
+import { pathToFileURL } from 'node:url';
+import { ResyClient } from './resy-client.mjs';
+import { addDays, dateStringInTimeZone, slotMatchesPref } from './check-resy.mjs';
+import { checkFees } from './book-resy.mjs';
+
+export async function inspectFourCharles(client, {today = dateStringInTimeZone(new Date()), report = console.log} = {}) {
+  const summary = {venueId:834,partySize:4,datesChecked:0,rawSlots:0,matchingSlots:0,checkoutsInspected:0,errors:0};
+  for (let offset = 0; offset <= 21; offset++) {
+    const date = addDays(today,offset);
+    try {
+      const slots = await client.find(834,date,4);
+      const matching = slots.filter(slot => slotMatchesPref(slot,date));
+      summary.datesChecked++;
+      summary.rawSlots += slots.length;
+      summary.matchingSlots += matching.length;
+      report(JSON.stringify({date,rawSlots:slots.length,matchingSlots:matching.length}));
+      // Inspect a real returned slot; never fabricate a configuration or book token.
+      const slot = matching[0] || slots[0];
+      if (!slot) continue;
+      const detail = await client.details(slot,date,4);
+      summary.checkoutsInspected++;
+      report(JSON.stringify({date,time:slot.date?.start,type:slot.config?.type,
+        matchesPreferences:slotMatchesPref(slot,date),slotPayment:slot.payment,
+        payment:detail.payment,cancellation:detail.cancellation,
+        currency:detail.venue?.currency,bookingBlock:checkFees(slot,detail,20),
+      }));
+    } catch (error) {
+      summary.errors++;
+      report(JSON.stringify({date,error:error.message}));
+    }
   }
-  return response.json();
+  report(JSON.stringify({summary}));
+  return summary;
 }
-const date = '2026-09-26';
-const account = await request('/3/user/reservations?type=upcoming&limit=100&offset=0');
-console.log(JSON.stringify({accountKeys:Object.keys(account),reservationsArray:Array.isArray(account.reservations),reservationFieldNames:account.reservations?.[0] ? Object.keys(account.reservations[0]) : []}));
-const data = await request('/4/find?lat=0&long=0&day=2026-09-26&party_size=2&venue_id=1927');
-const venues = data?.results?.venues;
-if (!Array.isArray(venues)) throw new Error('Unknown availability shape');
-for (const venue of venues) {
-  const slots = venue.slots.filter(s => s.date?.start?.includes('19:00:00'));
-  console.log(JSON.stringify({ venue: venue.venue?.name, venueId:venue.venue?.id, count: venue.slots.length, candidates: slots.map(s => ({ date:s.date, payment:s.payment, type:s.config?.type })) }));
-  if (!slots.length) continue;
-  const detail = await request('/3/details', {config_id:slots[0].config.token, day:date, party_size:'2'});
-  console.log(JSON.stringify({detailKeys:Object.keys(detail)}));
-  for (const key of ['payment','cancellation','cancel','terms','policies','display_values']) {
-    if (detail[key] !== undefined) console.log(JSON.stringify({ [key]: detail[key] }));
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const summary = await inspectFourCharles(new ResyClient({apiKey:process.env.RESY_API_KEY,authToken:process.env.RESY_AUTH_TOKEN}));
+    if (summary.errors) process.exitCode = 2;
+  } catch (error) {
+    console.log(JSON.stringify({error:error.message}));
+    process.exitCode = 2;
   }
 }
