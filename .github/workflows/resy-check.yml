@@ -12,6 +12,10 @@ on:
     - cron: '7 11 * * *'
   workflow_dispatch:
     inputs:
+      booking_test:
+        description: 'Book and immediately cancel the approved zero-fee Sep 26 test (requires validate_only)'
+        type: boolean
+        default: false
       inspect_booking:
         description: 'Read checkout fee diagnostics without booking or sending alerts'
         type: boolean
@@ -20,6 +24,13 @@ on:
         description: 'Check Resy once without sending email or phone alerts'
         type: boolean
         default: false
+
+concurrency:
+  group: resy-booking
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   check:
@@ -90,6 +101,15 @@ jobs:
           RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
           RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
         run: node inspect-booking.mjs
+
+      - name: Test booking and immediate cancellation
+        if: inputs.booking_test && inputs.validate_only && !inputs.inspect_booking
+        env:
+          RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
+          RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RESY_BOOKING_TEST: 'true'
+        run: node book-resy.mjs
 
       - name: Wait until 9 AM Eastern
         if: steps.window.outputs.should_run == 'true' && steps.window.outputs.manual != 'true'
