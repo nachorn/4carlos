@@ -39,6 +39,17 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
+      - name: Validate manual modes
+        run: |
+          if [ "${{ inputs.booking_test || inputs.inspect_booking }}" = "true" ] && [ "${{ inputs.validate_only }}" != "true" ]; then
+            echo "::error::Test and inspection modes require validate_only. No booking or alerts were attempted."
+            exit 2
+          fi
+          if [ "${{ inputs.booking_test && inputs.inspect_booking }}" = "true" ]; then
+            echo "::error::Choose either inspection or booking test, not both."
+            exit 2
+          fi
+
       - name: Prepare release window
         id: window
         run: |
@@ -272,6 +283,22 @@ jobs:
 
           write_outputs
 
+      - name: Book one matching reservation
+        if: ${{ !cancelled() && !inputs.validate_only && steps.resy.outcome == 'success' && steps.resy.outputs.available == 'true' }}
+        id: booking
+        env:
+          RESY_API_KEY: ${{ secrets.RESY_API_KEY }}
+          RESY_AUTH_TOKEN: ${{ secrets.RESY_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          node book-resy.mjs > booking-result.json
+          status=$?
+          set -e
+          cat booking-result.json
+          echo "status=$(jq -r '.status // "booking_needs_attention"' booking-result.json)" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
       - name: Build email diagnostics
         if: steps.window.outputs.should_run == 'true' && always()
         id: email
@@ -330,6 +357,12 @@ jobs:
             echo "Step outcomes:"
             echo "- Self-tests: ${{ steps.run_self_tests.outcome }}"
             echo "- Resy check: ${{ steps.resy.outcome }}"
+            echo "- Booking: ${{ steps.booking.outputs.status || 'not attempted' }}"
+            if [ -s booking-result.json ]; then
+              echo ""
+              echo "Booking result:"
+              cat booking-result.json
+            fi
             echo ""
             echo "Resy result:"
             echo "- Status: ${{ steps.resy.outputs.status }}"
@@ -386,16 +419,19 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib - Slots available"
+          subject: "4 Charles Prime Rib - ${{ steps.booking.outputs.status == 'booked' && 'Reservation booked' || 'Slots available' }}"
           body: |
             Slots are available for 4 Charles Prime Rib (4 people).
+            Automatic booking result: ${{ steps.booking.outputs.status || 'not attempted' }}.
+            Only 'booked' means a reservation was confirmed. If the result needs attention,
+            check your Resy account before manually booking another table.
 
             Slots found:
             ${{ steps.resy.outputs.slots }}
 
             ${{ steps.email.outputs.body }}
 
-            Book here:
+            View availability or manage your reservation in Resy:
             https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4
 
             Resy 4 Charles checker - GitHub Actions
@@ -449,6 +485,7 @@ jobs:
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM_PHONE: ${{ secrets.TWILIO_FROM_PHONE }}
           ALERT_PHONE: ${{ secrets.ALERT_PHONE }}
+          BOOKING_STATUS: ${{ steps.booking.outputs.status }}
         run: |
           missing=false
           for name in TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_PHONE ALERT_PHONE; do
@@ -465,6 +502,11 @@ jobs:
           slot_count="$(jq -r '(.slots // []) | length' result.json)"
           first_slot="$(jq -r 'if ((.slots // []) | length) > 0 then ((.slots[0].date // "unknown date") + " " + (.slots[0].time // "unknown time")) else "unknown time" end' result.json)"
           message="4 Charles reservation alert. ${slot_count} matching slots found. First slot: ${first_slot}. Check your email and book immediately."
+          if [ "${BOOKING_STATUS:-}" = "booked" ]; then
+            message="4 Charles reservation booked and confirmed. Check your email and Resy account for the details."
+          elif [ "${BOOKING_STATUS:-}" = "booking_needs_attention" ] || [ "${BOOKING_STATUS:-}" = "booking_locked" ]; then
+            message="4 Charles booking needs attention. Check your Resy account before making another reservation."
+          fi
           twiml="$(jq -nr --arg message "$message" '"<Response><Say voice=\"alice\" language=\"en-US\">\($message | @html)</Say><Pause length=\"1\"/><Say voice=\"alice\" language=\"en-US\">4 Charles slots are available. Check your email now.</Say></Response>"')"
 
           if ! response="$(

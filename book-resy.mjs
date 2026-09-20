@@ -16,6 +16,7 @@ export function checkFees(slot, detail, maxTotal) {
     if (!Object.hasOwn(slot.payment,key) || (slot.payment[key] !== null && slot.payment[key] !== 0)) return key;
   }
   if (typeof amounts.total !== 'number' || !Number.isFinite(amounts.total) || amounts.total < 0 || amounts.total > maxTotal) return 'total_exceeds_limit';
+  if (amounts.total > 0 && detail.venue?.currency?.toUpperCase() !== 'USD') return 'unknown_currency';
   // Only the explicitly authorized reservation charge is allowed. Unknown or
   // separate service charges, prepaid meals, deposits and add-ons stop booking.
   for (const key of ['add_ons','resy_fee','service_fee','tax','surcharge','price_per_unit']) {
@@ -53,7 +54,7 @@ export async function runBooking({client, journal, test = false, dates = getDate
   }
   candidates.sort((a,b) => Number(b.preferred)-Number(a.preferred) || a.slot.date.start.localeCompare(b.slot.date.start));
   const skipped = new Set();
-  for (const {slot,date} of candidates) {
+  for (const {slot,date} of candidates.slice(0,20)) {
     const detail = await client.details(slot,date,target.partySize);
     const reason = checkFees(slot,detail,target.maxTotal);
     if (reason) { skipped.add(reason); continue; }
@@ -78,7 +79,7 @@ export async function runBooking({client, journal, test = false, dates = getDate
       const after = await client.upcoming();
       const created = after.filter(r => !beforeIds.has(String(r.reservation_id)) && venueId(r) === target.venueId && r.day === date && Number(r.num_seats) === target.partySize && String(r.time_slot).startsWith(slot.date.start.slice(11,16)));
       if (created.length === 1 && (!booked?.reservation_id || String(created[0].reservation_id) === String(booked.reservation_id))) {
-        booked = {...created[0],...booked};
+        booked = {...booked,...created[0],resy_token:created[0].resy_token || booked?.resy_token};
         confirmed = true;
       }
       if (!confirmed) throw new Error('Booking outcome uncertain; inspect Resy account. Automatic retries are locked.');

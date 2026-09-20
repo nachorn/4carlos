@@ -240,7 +240,6 @@ async function findAvailability(apiKey, authToken, dateStr) {
   url.searchParams.set('day', dateStr);
   url.searchParams.set('party_size', String(PARTY_SIZE));
   url.searchParams.set('venue_id', String(VENUE_ID));
-  url.searchParams.set('x-resy-auth-token', authToken);
 
   const res = await fetch(url.toString(), {
     method: 'GET',

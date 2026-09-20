@@ -38,6 +38,7 @@ test('fee guard accepts the observed free checkout and rejects unknown or paid p
 test('4 Charles permits only the approved total reservation charge, up to $20',()=>{
   const {slot,detail}=fixture();
   slot.payment.is_paid=true; detail.payment.config.type='reservation';
+  detail.venue={currency:'USD'};
   Object.assign(detail.payment.amounts,{total:20,subtotal:20,reservation_charge:20});
   assert.equal(checkFees(slot,detail,20),null);
   assert.equal(checkFees(slot,detail,0),'total_exceeds_limit');
@@ -129,4 +130,16 @@ test('journal claim uses create-only semantics; finish uses returned SHA',async(
   assert.equal(Object.hasOwn(puts[0],'sha'),false);
   assert.equal(puts[1].sha,'version-1');
   assert.equal(puts[0].branch,'resy-booking-state');
+});
+
+test('malformed account data prevents treating the account as duplicate-free',async()=>{
+  const client=new ResyClient({apiKey:'key',authToken:'token',fetchImpl:async()=>Response.json({reservations:[{reservation_id:1}]})});
+  await assert.rejects(client.upcoming(),/duplicate check cannot be trusted/);
+});
+
+test('an account check failure after booking still cancels the test reservation',async()=>{
+  const f=fixture();let reads=0;
+  f.client.upcoming=async()=>{reads++; if(reads===3) throw new Error('Account unavailable'); return [];};
+  await assert.rejects(runBooking({...f,test:true}),/Account unavailable/);
+  assert.deepEqual(f.calls,['claim','book','cancel']);
 });

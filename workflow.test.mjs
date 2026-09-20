@@ -66,6 +66,23 @@ test('validation-only runs never send email or phone alerts', () => {
   }
 });
 
+test('normal booking requires slots and is disabled during validation', () => {
+  assert.equal(eligible('Book one matching reservation', slotsFound),true);
+  assert.equal(eligible('Book one matching reservation', slotsFound, {validate_only:true}),false);
+  for (const outcome of ['failure','skipped']) {
+    assert.equal(eligible('Book one matching reservation', {...slotsFound,resy:{outcome,outputs:{available:'true'}}}),false);
+  }
+  assert.equal(eligible('Book one matching reservation', {...slotsFound,resy:{outcome:'success',outputs:{available:'false'}}}),false);
+});
+
+test('live test requires both explicit inputs and excludes inspection mode', () => {
+  assert.equal(eligible('Test booking and immediate cancellation', {}, {}),undefined);
+  assert.equal(Boolean(eligible('Test booking and immediate cancellation', {}, {validate_only:true})),false);
+  assert.equal(Boolean(eligible('Test booking and immediate cancellation', {}, {booking_test:true})),false);
+  assert.equal(eligible('Test booking and immediate cancellation', {}, {booking_test:true,validate_only:true}),true);
+  assert.equal(eligible('Test booking and immediate cancellation', {}, {booking_test:true,validate_only:true,inspect_booking:true}),false);
+});
+
 function runPhone(mode, missingSecrets = false) {
   const dir = mkdtempSync(join(tmpdir(), 'resy-phone-test-'));
   try {

@@ -58,6 +58,16 @@ export class ResyClient {
     for (let offset = 0; offset < 1000; offset += 100) {
       const data = await this.request(`/3/user/reservations?type=upcoming&limit=100&offset=${offset}`);
       if (!Array.isArray(data?.reservations)) throw new Error('Unknown Resy reservations response');
+      for (const reservation of data.reservations) {
+        const venue = Number(reservation?.venue?.id?.resy ?? reservation?.venue?.id);
+        if (!Number.isSafeInteger(Number(reservation?.reservation_id)) || Number(reservation.reservation_id) <= 0
+            || !Number.isSafeInteger(venue) || venue <= 0
+            || !/^\d{4}-\d{2}-\d{2}$/.test(reservation.day || '')
+            || !Number.isSafeInteger(Number(reservation.num_seats)) || Number(reservation.num_seats) < 1
+            || !/^\d{2}:\d{2}(?::\d{2})?$/.test(reservation.time_slot || '')) {
+          throw new Error('Unknown Resy reservation fields; duplicate check cannot be trusted');
+        }
+      }
       result.push(...data.reservations);
       if (data.reservations.length < 100) return result;
     }
