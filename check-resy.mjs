@@ -15,6 +15,7 @@ const BASE = 'https://api.resy.com';
 const TIME_ZONE = 'America/New_York';
 const DATE_OFFSETS = [20, 21, 22];
 const AUTH_STATUS_CODES = new Set([401, 403, 419]);
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function datePartsInTimeZone(date, timeZone = TIME_ZONE) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -69,24 +70,24 @@ function parseSlotMinutes(slot) {
   const value = String(getSlotStart(slot) || '').trim();
   if (!value) return null;
 
-  const dateTimeMatch = value.match(/(?:T|\s)(\d{1,2}):(\d{2})(?::\d{2})?/);
-  if (dateTimeMatch) {
-    return Number(dateTimeMatch[1]) * 60 + Number(dateTimeMatch[2]);
-  }
-
-  const amPmMatch = value.match(/\b(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)\b/i);
+  const amPmMatch = value.match(/^(?:\d{4}-\d{2}-\d{2}[ T])?(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)$/i);
   if (amPmMatch) {
     let hour = Number(amPmMatch[1]);
     const minute = Number(amPmMatch[2] || 0);
+    if (hour < 1 || hour > 12 || minute > 59) return null;
     const period = amPmMatch[3].toLowerCase();
     if (period.startsWith('p') && hour !== 12) hour += 12;
     if (period.startsWith('a') && hour === 12) hour = 0;
     return hour * 60 + minute;
   }
 
-  const timeOnlyMatch = value.match(/^(\d{1,2}):(\d{2})/);
-  if (timeOnlyMatch) {
-    return Number(timeOnlyMatch[1]) * 60 + Number(timeOnlyMatch[2]);
+  const timeMatch = value.match(/^(?:\d{4}-\d{2}-\d{2}[ T])?(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?$/);
+  if (timeMatch) {
+    const hour = Number(timeMatch[1]);
+    const minute = Number(timeMatch[2]);
+    const second = Number(timeMatch[3] || 0);
+    if (hour > 23 || minute > 59 || second > 59) return null;
+    return hour * 60 + minute;
   }
 
   return null;
@@ -138,15 +139,27 @@ function flattenSlots(value) {
 }
 
 function extractSlots(data) {
-  const venues = data?.results?.venues || data?.venues || [];
+  const venues = data?.results?.venues ?? data?.venues;
+  if (venues != null && !Array.isArray(venues)) {
+    throw new Error('Unexpected Resy venues response shape');
+  }
   const candidates = [
-    Array.isArray(venues) ? venues.flatMap((venue) => venue?.slots || []) : null,
+    Array.isArray(venues) ? venues.flatMap((venue) => venue?.slots || []) : undefined,
     data?.results?.slots,
     data?.slots,
     data?.scheduled,
     data?.availability,
     data?.inventory,
   ];
+  if (Array.isArray(data)) candidates.push(data);
+  if (candidates.every((candidate) => candidate === undefined)) {
+    throw new Error('Unexpected Resy response: no recognized availability fields');
+  }
+  for (const candidate of candidates) {
+    if (candidate != null && typeof candidate !== 'object') {
+      throw new Error('Unexpected Resy slots response shape');
+    }
+  }
 
   const slots = [];
   const seen = new Set();
@@ -160,8 +173,8 @@ function extractSlots(data) {
     }
   }
 
-  if (slots.length > 0) return slots;
-  return flattenSlots(data);
+  // Never search venue metadata for slots after an explicit empty result.
+  return slots;
 }
 
 function extractApiError(data) {
@@ -227,10 +240,10 @@ async function findAvailability(apiKey, authToken, dateStr) {
   url.searchParams.set('day', dateStr);
   url.searchParams.set('party_size', String(PARTY_SIZE));
   url.searchParams.set('venue_id', String(VENUE_ID));
-  url.searchParams.set('x-resy-auth-token', authToken);
 
   const res = await fetch(url.toString(), {
     method: 'GET',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       Authorization: `ResyAPI api_key="${apiKey}"`,
       'x-resy-auth-token': authToken,
@@ -332,8 +345,9 @@ async function main() {
         });
       }
     } catch (error) {
-      counts.push({ date: dateStr, ok: false, errorType: 'request', rawCount: 0, matchedCount: 0 });
-      errors.push(`${dateStr}: ${error.message}`);
+      const timedOut = error.name === 'TimeoutError' || error.name === 'AbortError';
+      counts.push({ date: dateStr, ok: false, errorType: timedOut ? 'timeout' : 'request', rawCount: 0, matchedCount: 0 });
+      errors.push(`${dateStr}: ${timedOut ? `Resy request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds` : error.message}`);
     }
   }
 
