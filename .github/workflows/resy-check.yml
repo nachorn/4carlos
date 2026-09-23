@@ -7,8 +7,10 @@ name: Resy 4 Charles Check
 
 on:
   schedule:
-    # Primary 6:11 AM Eastern; backup 8:17 AM Eastern.
+    # Early start 3:35 AM Eastern; backup starts at 6:11 and 8:17 AM.
     # Both wait for 9 AM. Skip the UTC variants for the other season.
+    - cron: '35 7 * * *'
+    - cron: '35 8 * * *'
     - cron: '11 10 * * *'
     - cron: '11 11 * * *'
     - cron: '17 12 * * *'
@@ -39,7 +41,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 350
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -85,14 +87,16 @@ jobs:
           echo "manual=false" >> "$GITHUB_OUTPUT"
 
           if [ "$et_offset" = "-0400" ]; then
+            early_schedule="35 7 * * *"
             expected_schedule="11 10 * * *"
             backup_schedule="17 12 * * *"
           else
+            early_schedule="35 8 * * *"
             expected_schedule="11 11 * * *"
             backup_schedule="17 13 * * *"
           fi
 
-          if [ "${{ github.event.schedule }}" != "$expected_schedule" ] && [ "${{ github.event.schedule }}" != "$backup_schedule" ]; then
+          if [ "${{ github.event.schedule }}" != "$early_schedule" ] && [ "${{ github.event.schedule }}" != "$expected_schedule" ] && [ "${{ github.event.schedule }}" != "$backup_schedule" ]; then
             echo "Skipping wrong-season UTC schedule."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -188,6 +192,8 @@ jobs:
         run: |
           available=false
           had_success=false
+          consecutive_error_runs=0
+          retry_delay=4
           : > attempt-log.txt
           : > observations.jsonl
 
@@ -244,6 +250,7 @@ jobs:
               result_auth_failed="$(jq -r '(.authFailed // false) | tostring' result.json)"
               result_raw_count="$(jq -r '[.counts[]?.rawCount // 0] | add // 0' result.json)"
               result_matched_count="$(jq -r '[.counts[]?.matchedCount // 0] | add // 0' result.json)"
+              result_error_count="$(jq -r '(.errors // []) | length' result.json)"
               result_date_counts="$(jq -r '(.counts // []) | map(.date + ":" + (if .ok then "raw=" + ((.rawCount // 0) | tostring) + ",matched=" + ((.matchedCount // 0) | tostring) else "error=" + (.errorType // "unknown") end)) | join("; ")' result.json)"
             else
               result_status="invalid_result"
@@ -253,10 +260,25 @@ jobs:
               result_auth_failed="false"
               result_raw_count="0"
               result_matched_count="0"
+              result_error_count="1"
               result_date_counts="no valid JSON"
             fi
 
             echo "Attempt $i at $attempt_time: exit=$status, status=$result_status, looked=$result_looked, authFailed=$result_auth_failed, available=$result_available, rawSlots=$result_raw_count, matchedSlots=$result_matched_count, dates=[$result_date_counts]" >> attempt-log.txt
+
+            if [ "$result_error_count" -gt 0 ]; then
+              consecutive_error_runs=$((consecutive_error_runs + 1))
+              if [ "$consecutive_error_runs" -ge 4 ]; then
+                retry_delay=30
+              elif [ "$consecutive_error_runs" -eq 3 ]; then
+                retry_delay=16
+              elif [ "$consecutive_error_runs" -eq 2 ]; then
+                retry_delay=8
+              fi
+            else
+              consecutive_error_runs=0
+              retry_delay=4
+            fi
 
             if [ "$status" -ne 0 ]; then
               echo "Checker returned status $status."
@@ -267,7 +289,7 @@ jobs:
               fi
 
               if [ "$i" -lt "$MAX_ATTEMPTS" ]; then
-                sleep 4
+                sleep "$retry_delay"
                 continue
               fi
 
@@ -293,7 +315,7 @@ jobs:
               break
             fi
 
-            if [ "$i" -lt "$MAX_ATTEMPTS" ]; then sleep 4; fi
+            if [ "$i" -lt "$MAX_ATTEMPTS" ]; then sleep "$retry_delay"; fi
           done
 
           if [ "$available" != "true" ] && [ "$had_success" = "true" ]; then

@@ -16,9 +16,9 @@ import {
 test('getDatesToCheck uses the New York calendar day', () => {
   const lateUtcStillPreviousDayInNewYork = new Date('2026-05-13T02:00:00Z');
   assert.deepEqual(getDatesToCheck(lateUtcStillPreviousDayInNewYork), [
+    '2026-05-31',
     '2026-06-01',
     '2026-06-02',
-    '2026-06-03',
   ]);
 });
 

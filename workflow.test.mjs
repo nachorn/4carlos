@@ -66,6 +66,28 @@ test('validation-only runs never send email or phone alerts', () => {
   }
 });
 
+test('repeated API errors slow actual workflow retries without booking', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'resy-retry-test-'));
+  try {
+    const outputPath=join(dir,'github-output.txt');
+    writeFileSync(outputPath,'');
+    const stub = [
+      'export PATH="/usr/bin:$PATH"',
+      'if [ -n "$TEST_JQ_PATH" ]; then jq() { "$TEST_JQ_PATH" --binary "$@"; }; fi',
+      'node() { printf \'%s\\n\' \'{"available":false,"looked":false,"authFailed":false,"status":"check_failed","slots":[],"checked":[],"counts":[],"errors":["HTTP 500"]}\'; return 2; }',
+      'sleep() { printf "%s\\n" "$1" >> delays.txt; }',
+    ].join('\n');
+    const result=spawnSync(process.env.BASH_PATH || (process.platform === 'win32' ? 'C:/Program Files/Git/usr/bin/bash.exe' : 'bash'),
+      ['--noprofile','--norc','-e','-o','pipefail','-c',stub+'\n'+script('Check Resy availability')],{
+        cwd:dir,encoding:'utf8',timeout:10000,
+        env:{...process.env,MAX_ATTEMPTS:'4',GITHUB_OUTPUT:outputPath},
+      });
+    assert.ifError(result.error);
+    assert.equal(result.status,2,result.stderr);
+    assert.deepEqual(readFileSync(join(dir,'delays.txt'),'utf8').trim().split(/\r?\n/),['4','8','16']);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
 test('normal booking requires slots and is disabled during validation', () => {
   assert.equal(eligible('Book one matching reservation', slotsFound),true);
   assert.equal(eligible('Book one matching reservation', slotsFound, {validate_only:true}),false);

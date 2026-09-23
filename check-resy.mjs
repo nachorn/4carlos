@@ -13,7 +13,7 @@ const VENUE_ID = 834; // 4 Charles Prime Rib
 const PARTY_SIZE = 4;
 const BASE = 'https://api.resy.com';
 const TIME_ZONE = 'America/New_York';
-const DATE_OFFSETS = [20, 21, 22];
+const DATE_OFFSETS = [19, 20, 21];
 const AUTH_STATUS_CODES = new Set([401, 403, 419]);
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -40,7 +40,8 @@ function addDays(dateStr, days) {
   return date.toISOString().slice(0, 10);
 }
 
-// Dates to check: today in New York + 20, 21, 22 days.
+// Resy opens 4 Charles bookings through 21 days ahead. Check that day and
+// the previous two for cancellations without requesting an unopened date.
 function getDatesToCheck(referenceDate = new Date()) {
   const todayEt = dateStringInTimeZone(referenceDate);
   return DATE_OFFSETS.map((offset) => addDays(todayEt, offset));
