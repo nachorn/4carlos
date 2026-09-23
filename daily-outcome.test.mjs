@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dailyOutcome } from './daily-outcome.mjs';
+import { dailyOutcome, emailReport } from './daily-outcome.mjs';
 import { checkedToday } from './schedule-guard.mjs';
 
 const empty={looked:true,available:false,slots:[],counts:[{rawCount:0}]};
@@ -43,6 +43,23 @@ test('reports the number of failed attempts and HTTP codes without losing health
   assert.equal(result.outcome,'Availability uncertain');
   assert.equal(result.errorAttempts,2);
   assert.deepEqual(result.errorKinds,['HTTP 500']);
+});
+test('email stays brief while preserving the outcome and a link to detailed evidence',()=>{
+  const runUrl='https://github.com/nachorn/4carlos/actions/runs/123';
+  const booked=emailReport(dailyOutcome([found],{status:'booked',confirmed:true}),{runUrl});
+  assert.match(booked,/Reservation booked/);
+  assert.match(booked,/2026-10-11 at 19:00/);
+  assert.match(booked,/Detailed report: .*runs\/123/);
+  assert.doesNotMatch(booked,/HTTP|First\/last observation|Final result JSON|Attempt log/);
+
+  const missed=emailReport(dailyOutcome([found],{status:'no_bookable_slots'}));
+  assert.match(missed,/Table observed — not booked/);
+  assert.match(missed,/no longer available/);
+
+  const uncertain=emailReport(dailyOutcome([{...empty,looked:false,errors:['HTTP 500']}],null,{late:true}));
+  assert.match(uncertain,/Availability uncertain/);
+  assert.match(uncertain,/first check started after 9 AM/i);
+  assert.doesNotMatch(uncertain,/No tables observed/);
 });
 test('backup skips a completed real scheduled check but not skipped jobs or previous dates',async()=>{
   const today='2026-09-20';

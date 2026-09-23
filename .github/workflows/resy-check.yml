@@ -349,13 +349,11 @@ jobs:
           VALIDATE_ONLY: ${{ inputs.validate_only }}
         run: node daily-outcome.mjs
 
-      - name: Build email diagnostics
+      - name: Build detailed report and email body
         if: steps.window.outputs.should_run == 'true' && always()
         id: email
         run: |
-          delimiter="EMAIL_BODY_$(date +%s%N)"
           {
-            echo "body<<$delimiter"
             if [ -s daily-outcome.txt ]; then
               cat daily-outcome.txt
               echo ""
@@ -460,11 +458,22 @@ jobs:
             else
               echo "No result.json was written."
             fi
+          } > detailed-report.txt
+
+          delimiter="EMAIL_BODY_$(date +%s%N)"
+          {
+            echo "body<<$delimiter"
+            if [ -s email-body.txt ]; then
+              cat email-body.txt
+            else
+              echo "The daily report could not be built. Review this workflow run."
+              echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            fi
             echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Send email (slots available)
-        if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome == 'success' && steps.resy.outputs.available == 'true' }}
+      - name: Send daily email
+        if: ${{ always() && !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' }}
         uses: dawidd6/action-send-mail@v17
         with:
           server_address: smtp.gmail.com
@@ -473,62 +482,8 @@ jobs:
           password: ${{ secrets.SMTP_PASSWORD }}
           from: ${{ secrets.SMTP_USER }}
           to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib - ${{ steps.daily.outputs.outcome || 'Booking outcome unavailable' }}"
-          body: |
-            Matching tables were observed for 4 Charles Prime Rib (4 people).
-            Automatic booking result: ${{ steps.booking.outputs.status || 'not attempted' }}.
-            Only 'booked' means a reservation was confirmed. If the result needs attention,
-            check your Resy account before manually booking another table.
-
-            Slots found:
-            ${{ steps.resy.outputs.slots }}
-
-            ${{ steps.email.outputs.body }}
-
-            View availability or manage your reservation in Resy:
-            https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4
-
-            Resy 4 Charles checker - GitHub Actions
-
-      - name: Send email (checked, no matching slots)
-        if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome == 'success' && steps.resy.outputs.available != 'true' }}
-        uses: dawidd6/action-send-mail@v17
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.SMTP_USER }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          from: ${{ secrets.SMTP_USER }}
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib - ${{ steps.daily.outputs.outcome || 'Check outcome unavailable' }}"
-          body: |
-            The checker ran and did not find matching 4-person slots.
-
-            ${{ steps.email.outputs.body }}
-
-            If "Looked successfully" is true and each date says "API ok", Resy responded and the checker was able to inspect availability.
-
-            Resy 4 Charles checker - GitHub Actions
-
-      - name: Send email (checker error)
-        if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome != 'success' }}
-        uses: dawidd6/action-send-mail@v17
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.SMTP_USER }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          from: ${{ secrets.SMTP_USER }}
-          to: ${{ secrets.NOTIFY_EMAIL }}
-          subject: "4 Charles Prime Rib - ${{ steps.daily.outputs.outcome || 'Checker error' }}"
-          body: |
-            The Resy checker hit an error, usually from expired Resy credentials or an API/security response.
-
-            ${{ steps.email.outputs.body }}
-
-            If the log mentions Resy credentials, pass the Resy security center again and update RESY_AUTH_TOKEN in repo Secrets.
-
-            Resy 4 Charles checker - GitHub Actions
+          subject: "4 Charles Prime Rib - ${{ steps.daily.outputs.outcome || 'Check needs review' }}"
+          body: ${{ steps.email.outputs.body || 'The daily report could not be built. Please review the GitHub Actions run.' }}
 
       - name: Call phone (slots available)
         if: ${{ !cancelled() && !inputs.validate_only && steps.window.outputs.should_run == 'true' && steps.resy.outcome == 'success' && steps.resy.outputs.available == 'true' }}
@@ -599,6 +554,8 @@ jobs:
           path: |
             daily-outcome.json
             daily-outcome.txt
+            email-body.txt
+            detailed-report.txt
             observations.jsonl
             attempt-log.txt
             booking-result.json
