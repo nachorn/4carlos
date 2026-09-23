@@ -4,10 +4,17 @@ import { pathToFileURL } from 'node:url';
 export function dailyOutcome(attempts, booking, {late = false, validation = false} = {}) {
   const observed = new Map();
   let sawMatching = false, sawAny = false, failed = attempts.length === 0;
+  let errorAttempts = 0;
+  const errorKinds = new Set();
   for (const attempt of attempts) {
     sawMatching ||= attempt.available === true;
     sawAny ||= (attempt.counts || []).some(c => c.rawCount > 0);
     failed ||= !attempt.looked || (attempt.errors || []).length > 0;
+    if (!attempt.looked || (attempt.errors || []).length > 0) errorAttempts++;
+    for (const error of attempt.errors || []) {
+      const code = String(error).match(/HTTP \d{3}/)?.[0];
+      if (code) errorKinds.add(code);
+    }
     for (const slot of attempt.slots || []) observed.set(slot.date + ' ' + slot.time, {date:slot.date,time:slot.time});
   }
   let outcome, reason;
@@ -34,7 +41,7 @@ export function dailyOutcome(attempts, booking, {late = false, validation = fals
     observedSlots:[...observed.values()],bookingStatus:status || 'not_attempted',
     firstObservation:attempts[0]?.observedAt || null,lastObservation:attempts.at(-1)?.observedAt || null,
     coverage:late ? 'Started after 9 AM Eastern; availability before the first check is unknown.' : 'Covers only the recorded checks; tables between checks may not be observed.',
-    hadCheckErrors:failed};
+    hadCheckErrors:failed,errorAttempts,errorKinds:[...errorKinds]};
 }
 
 function optionalJson(path) {try{return JSON.parse(readFileSync(path,'utf8'));}catch{return null;}}
@@ -44,6 +51,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const result=dailyOutcome(attempts,optionalJson('booking-result.json'),{late:process.env.LATE_START==='true',validation:process.env.VALIDATE_ONLY==='true'});
   writeFileSync('daily-outcome.json',JSON.stringify(result,null,2));
   const lines=[result.outcome,result.reason,'Checks made: '+result.attemptCount,
+    'Attempts with errors: '+result.errorAttempts+(result.errorKinds.length ? ' ('+result.errorKinds.join(', ')+')' : ''),
     'First/last observation (UTC): '+(result.firstObservation || 'unknown')+' / '+(result.lastObservation || 'unknown'),
     result.coverage,...result.observedSlots.map(s=>'- '+s.date+' '+s.time)];
   writeFileSync('daily-outcome.txt',lines.join('\n')+'\n');

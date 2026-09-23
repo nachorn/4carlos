@@ -1,11 +1,14 @@
 # Running the Resy checker and booker
 
 The scheduled job prepares Node and runs its tests before waiting for 9 AM in
-New York. It checks three dates (20, 21 and 22 days ahead), up to 30 times with
-four seconds between attempts. GitHub can delay scheduled jobs, so exact release
+New York. It checks three dates (19, 20 and 21 days ahead), up to 30 times with
+four seconds between healthy attempts. Repeated errors slow retries to 8, 16,
+then 30 seconds so Resy is not hammered while failing. GitHub can delay scheduled jobs, so exact release
 timing is not guaranteed.
 
-The primary schedule starts at 6:11 AM Eastern, with an 8:17 AM backup. Both wait
+After scheduled runs on September 21–23 actually started between 10:51 AM and
+12:28 PM Eastern, an earlier start was added for 3:35 AM, with 6:11 AM and
+8:17 AM backups. All wait
 until 9 AM. The UTC schedules are filtered for daylight/standard time. The shared
 concurrency group serializes runs, and a later start skips the check if a successful
 scheduled run already actually checked Resy that New York calendar day. Skipped
@@ -31,7 +34,8 @@ with instructions to check the account before another attempt.
 
 Every valid checker result is preserved in `observations.jsonl`, so an earlier
 observation is not lost when a later attempt fails or returns no tables. Reports
-include observation times, check count and a late-start warning when the check
+include observation times, check count, number of attempts with errors, HTTP
+status codes and a late-start warning when the check
 begins more than ten seconds after 9 AM Eastern. This cannot establish whether a
 table existed before checking began or between requests. The checker watches the
 configured three release dates; it is not an all-day or all-date availability log.

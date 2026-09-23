@@ -34,6 +34,16 @@ test('reports observation limits and failed checks without claiming no availabil
   assert.equal(dailyOutcome([{...empty,counts:[{rawCount:2}]}],null).outcome,'Tables observed outside your preferences');
   assert.equal(dailyOutcome([found],null,{validation:true}).outcome,'Table observed — validation only');
 });
+test('reports the number of failed attempts and HTTP codes without losing healthy observations',()=>{
+  const result=dailyOutcome([
+    {looked:true,counts:[{rawCount:0}],errors:[]},
+    {looked:false,counts:[],errors:['2026-10-13: HTTP 500']},
+    {looked:true,counts:[{rawCount:0}],errors:['2026-10-14: HTTP 500']},
+  ],null);
+  assert.equal(result.outcome,'Availability uncertain');
+  assert.equal(result.errorAttempts,2);
+  assert.deepEqual(result.errorKinds,['HTTP 500']);
+});
 test('backup skips a completed real scheduled check but not skipped jobs or previous dates',async()=>{
   const today='2026-09-20';
   const run={id:1,status:'completed',conclusion:'success',created_at:'2026-09-20T10:11:00Z'};
