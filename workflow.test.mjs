@@ -21,27 +21,23 @@ function eligible(name, state, inputs = {}) {
   const condition = step(name).match(/^        if: (.*)$/m)[1]
     .replace(/^\$\{\{\s*|\s*\}\}$/g, '');
   // Evaluate the actual status condition against simulated previous step outcomes.
-  return Function('steps', 'inputs', 'cancelled', 'success', 'failure', 'return (' + condition + ')')(
-    state, inputs, () => false, () => false, () => true,
+  return Function('steps', 'inputs', 'cancelled', 'success', 'failure', 'always', 'return (' + condition + ')')(
+    state, inputs, () => false, () => false, () => true, () => true,
   );
 }
 const slotsFound = {
   window: { outputs: { should_run: 'true' } },
   resy: { outcome: 'success', outputs: { available: 'true' } },
 };
-test('availability email and phone remain eligible after an unrelated step fails', () => {
-  assert.equal(eligible('Send email (slots available)', slotsFound), true);
+test('daily email and phone remain eligible after an unrelated step fails', () => {
+  assert.equal(eligible('Send daily email', slotsFound), true);
   assert.equal(eligible('Call phone (slots available)', slotsFound), true);
-  assert.equal(eligible('Send email (checker error)', slotsFound), false);
-  assert.equal(eligible('Send email (checked, no matching slots)', slotsFound), false);
 });
-test('error and empty-result emails are mutually exclusive', () => {
+test('the same daily email sends for an empty result or checker error', () => {
   const noSlots = { ...slotsFound, resy: { outcome: 'success', outputs: { available: 'false' } } };
   const failed = { ...slotsFound, resy: { outcome: 'failure', outputs: { available: 'false' } } };
-  assert.equal(eligible('Send email (checked, no matching slots)', noSlots), true);
-  assert.equal(eligible('Send email (checker error)', noSlots), false);
-  assert.equal(eligible('Send email (checked, no matching slots)', failed), false);
-  assert.equal(eligible('Send email (checker error)', failed), true);
+  assert.equal(eligible('Send daily email', noSlots), true);
+  assert.equal(eligible('Send daily email', failed), true);
   assert.equal(eligible('Call phone (slots available)', failed), false);
 });
 test('checkout, runtime setup and tests finish before the release wait', () => {
@@ -52,11 +48,11 @@ test('checkout, runtime setup and tests finish before the release wait', () => {
   }
   assert.equal(names[wait + 1], 'Record check start time');
   assert.equal(names[wait + 2], 'Check Resy availability');
-  assert.ok(names.indexOf('Send email (slots available)') < names.indexOf('Call phone (slots available)'));
+  assert.ok(names.indexOf('Send daily email') < names.indexOf('Call phone (slots available)'));
 });
 
 test('validation-only runs never send email or phone alerts', () => {
-  for (const name of ['Send email (slots available)', 'Send email (checked, no matching slots)', 'Send email (checker error)', 'Call phone (slots available)']) {
+  for (const name of ['Send daily email', 'Call phone (slots available)']) {
     for (const outcome of ['success', 'failure']) {
       for (const available of ['true', 'false']) {
         const state = { ...slotsFound, resy: { outcome, outputs: { available } } };
@@ -158,13 +154,13 @@ test('phone transport failures are bounded and leave email eligible', () => {
   const result = runPhone('network');
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stdout, /failed to connect/);
-  assert.equal(eligible('Send email (slots available)', slotsFound), true);
+  assert.equal(eligible('Send daily email', slotsFound), true);
 });
 test('phone API rejection is reported without suppressing availability email', () => {
   const result = runPhone('http');
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stdout, /failed with HTTP 400/);
-  assert.equal(eligible('Send email (slots available)', slotsFound), true);
+  assert.equal(eligible('Send daily email', slotsFound), true);
 });
 test('phone script skips missing credentials without making a call', () => {
   const result = runPhone('success', true);

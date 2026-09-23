@@ -45,6 +45,32 @@ export function dailyOutcome(attempts, booking, {late = false, validation = fals
 }
 
 function optionalJson(path) {try{return JSON.parse(readFileSync(path,'utf8'));}catch{return null;}}
+
+export function emailReport(result, {runUrl = ''} = {}) {
+  const lines = ['4 Charles Prime Rib · 4 people', '', result.outcome];
+  const reason = result.bookingStatus === 'booking_blocked_by_policy'
+    ? 'Booking stopped because the fee or cancellation terms did not meet your approved limits.'
+    : result.reason;
+  lines.push(reason);
+  if (result.observedSlots.length) {
+    lines.push('', 'Tables seen:');
+    for (const slot of result.observedSlots.slice(0, 3)) lines.push('- ' + slot.date + ' at ' + slot.time);
+    if (result.observedSlots.length > 3) lines.push(`- ${result.observedSlots.length - 3} more in the detailed report`);
+  }
+  if (result.outcome === 'No tables observed' || result.outcome === 'Tables observed outside your preferences') {
+    lines.push('', `Checked ${result.attemptCount} time${result.attemptCount === 1 ? '' : 's'} today.`);
+  }
+  if (result.hadCheckErrors && result.outcome !== 'Availability uncertain') {
+    lines.push('', 'Some checks had errors; see the detailed report.');
+  }
+  if (result.coverage.startsWith('Started after 9 AM')) {
+    lines.push('', 'The first check started after 9 AM; earlier availability is unknown.');
+  }
+  lines.push('', 'Resy: https://resy.com/cities/new-york-ny/venues/4-charles-prime-rib?seats=4');
+  if (runUrl) lines.push('Detailed report: ' + runUrl + ' (Actions artifact)');
+  return lines.join('\n') + '\n';
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let attempts=[];
   try {attempts=readFileSync('observations.jsonl','utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));} catch { const result=optionalJson('result.json');if(result) attempts=[result]; }
@@ -55,6 +81,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     'First/last observation (UTC): '+(result.firstObservation || 'unknown')+' / '+(result.lastObservation || 'unknown'),
     result.coverage,...result.observedSlots.map(s=>'- '+s.date+' '+s.time)];
   writeFileSync('daily-outcome.txt',lines.join('\n')+'\n');
+  const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+    ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : '';
+  writeFileSync('email-body.txt',emailReport(result,{runUrl}));
   if(process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT,'outcome='+result.outcome+'\n');
   if(process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n\n')+'\n');
 }

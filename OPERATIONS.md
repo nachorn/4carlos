@@ -25,6 +25,13 @@ scheduler and is not an independent guarantee.
 
 ## Daily outcome report
 
+The daily email is a short result: what happened, any table seen or booking action
+needed, and a link to the GitHub Actions run. The artifact on that run has two
+versions: `email-body.txt` (the sent summary) and `detailed-report.txt` (the
+diagnostics, run metadata, booking result and final checker result). The detailed
+artifact is for troubleshooting; the email does not include raw JSON or attempt
+logs.
+
 Email subjects and the Actions run summary distinguish confirmed bookings,
 observed tables that were not booked, unknown booking outcomes, fee-policy blocks,
 existing reservations, tables outside preferences, and checks with no observed
@@ -40,8 +47,8 @@ begins more than ten seconds after 9 AM Eastern. This cannot establish whether a
 table existed before checking began or between requests. The checker watches the
 configured three release dates; it is not an all-day or all-date availability log.
 
-Each active run uploads its daily outcome, observations, attempt log and booking
-result as an Actions artifact retained for 30 days. These files exclude Resy auth,
+Each active run uploads both report versions, its daily outcome, observations,
+attempt log and booking result as an Actions artifact retained for 30 days. These files exclude Resy auth,
 booking and cancellation tokens and account/payment details. Validation-only runs
 build the same report without sending email or attempting bookings.
 
